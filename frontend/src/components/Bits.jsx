@@ -10,9 +10,9 @@ export function Trace({ id, lines, onClick }) {
 
 export function PageHead({ n, eyebrow, dim, title, children, right }) {
   return (
-    <div className="pagehead">
+    <div className="pagehead anim-in">
       <div style={{ flex: 1, minWidth: 300 }}>
-        <div className="eyebrow"><span className="n">{n}</span>{eyebrow}</div>
+        <div className="eyebrow section"><span className="n">{n}</span>{eyebrow}</div>
         <h1 style={{ marginTop: 12 }}>{dim && <span className="dim">{dim}</span>}{title}</h1>
         {children && <p>{children}</p>}
       </div>

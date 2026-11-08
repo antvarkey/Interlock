@@ -11,24 +11,39 @@ from dataclasses import dataclass, field
 
 @dataclass
 class PlantParams:
-    idle_kw: float = 180.0          # IT power with the cluster idle
-    full_kw: float = 1400.0         # IT power at full training load
-    ramp_s: int = 8                 # seconds for the job to ramp between power levels
+    """One data hall, sized from public information about large GPU deployments.
+
+    NMC² does not publish equipment details for its Spartanburg site, so these are
+    industry-typical values (see README, "Plant model"). Replace them with real
+    values from the facility. Power is in kW, temperatures in °C, times in seconds.
+    """
+    # IT load: 64 liquid-cooled rack-scale GPU systems at about 130 kW each
+    racks: int = 64
+    gpus_per_rack: int = 72
+    idle_kw: float = 2100.0         # cluster idle (about 25 % of peak)
+    full_kw: float = 8300.0         # all racks training at full power
+    ramp_s: int = 10                # synchronous job start: idle to full in about 10 s
     staged_frac: float = 0.5        # first stage of a staged start
-    staged_hold_s: int = 150        # seconds at the first stage
-    chiller_cap_kw: float = 900.0   # cooling capacity of one chiller
-    ch2_delay_s: int = 15           # seconds from start command to "running"
-    ch2_ramp_s: int = 30            # seconds from running to full capacity
-    loop_kj_per_c: float = 4000.0   # thermal mass of the chilled-water loop
-    kp_kw_per_c: float = 150.0      # extra cooling per degree above setpoint
-    setpoint_c: float = 7.0
-    throttle_c: float = 15.0        # GPUs throttle above this supply temperature
-    shutdown_c: float = 18.0        # GPUs shut down above this supply temperature
-    chiller_kw_per_kw: float = 0.25  # electrical power per kW of cooling
-    pump_kw: float = 20.0
+    staged_hold_s: int = 240        # seconds at the first stage
+    # Chilled-water plant: water-cooled centrifugal chillers + evaporative cooling towers,
+    # feeding the rack CDUs. 2 duty chillers + 1 standby (N+1); the standby is not modelled.
+    chiller_cap_kw: float = 4500.0  # one chiller (about 1,280 tons of refrigeration)
+    ch2_delay_s: int = 45           # start command to "running" (vendor fast-start figures: 43 s and up)
+    ch2_ramp_s: int = 120           # running to full capacity
+    loop_kj_per_c: float = 150000.0  # thermal mass of the facility-water loop (about 36 m3 of water)
+    kp_kw_per_c: float = 900.0      # extra cooling per degree above setpoint
+    setpoint_c: float = 25.0        # facility-water supply to the CDUs
+    throttle_c: float = 32.0        # GPUs throttle above this supply temperature
+    shutdown_c: float = 35.0        # GPUs shut down above this supply temperature
+    chiller_kw_per_kw: float = 0.17  # chiller electrical power per kW of cooling (about 0.6 kW/ton)
+    pump_kw: float = 250.0          # pumps and cooling-tower fans
     shed_frac: float = 0.15         # IT load removed when load shedding is on
-    job_start_s: int = 90
-    duration_s: int = 420
+    job_start_s: int = 300          # job clock: the job starts this many seconds after it is queued
+    after_start_s: int = 420        # how long to simulate after the job starts
+
+    @property
+    def duration_s(self) -> int:
+        return self.job_start_s + self.after_start_s
 
 
 def job_target_kw(p: PlantParams, profile: str, t: int) -> float:

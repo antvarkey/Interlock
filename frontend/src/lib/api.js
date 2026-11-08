@@ -14,11 +14,22 @@ async function call(path, body) {
 }
 
 export const api = {
-  state: () => call("state"),
+  state: (jobStart) => call(`state${jobStart ? `?job_start_s=${jobStart}` : ""}`),
   prewarning: (plan) => call("prewarning", plan),
   simulate: (plan) => call("simulate", plan),
   parity: (sequences, bug = null) => call("parity", { sequences, bug }),
   ask: (question) => call("ask", { question }),
-  llmStatus: () => call("llm/status"),
-  llmTranslate: () => call("llm/translate", {}),
 };
+
+/** Ask the backend for the root cause analysis document and save it. */
+export async function downloadReport(body) {
+  const res = await fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`report failed (${res.status})`);
+  const blob = await res.blob();
+  const name = (res.headers.get("content-disposition") || "").match(/filename="([^"]+)"/)?.[1] || `interlock-rca.${body.format}`;
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return name;
+}

@@ -1,6 +1,6 @@
 (* ================================================================= *)
 (*  CHW PLANT SEQUENCER   V2.3    REV 2004-11-18   R.KOWALSKI         *)
-(*  HALL A / HALL B COMMON LOOP                                       *)
+(*  HALL A / HALL B COMMON LOOP   (TO CDU FACILITY WATER, 2023)       *)
 (*  DO NOT MODIFY.  SEE PLANT OPS BEFORE ANY CHANGE.                  *)
 (*  SCAN = 1 SEC                                                      *)
 (* ================================================================= *)
@@ -15,7 +15,7 @@ VAR_INPUT
 END_VAR
 
 VAR
-  TS1_P  : REAL := 7.0;  (* TS1 LAST SCAN *)
+  TS1_P  : REAL := 25.0;  (* TS1 LAST SCAN *)
   DT     : REAL := 0.0;  (* TS1 DELTA *)
   RR_CT  : INT := 0;     (* RISE COUNTER *)
   ST_CT  : INT := 0;     (* STAGE COUNTER *)
@@ -35,7 +35,7 @@ DT := TS1 - TS1_P;
 TS1_P := TS1;
 
 (* --- RISE CHECK (PUMP PROTECT) --- *)
-IF DT > 0.10 THEN
+IF DT > 0.02 THEN
   RR_CT := RR_CT + 1;
 ELSE
   RR_CT := 0;
@@ -77,7 +77,7 @@ IF MAN_C2 AND NOT TRP THEN
 END_IF;
 
 (* --- POWER CAP --- *)
-SHD_CM := PF1 > 1850.0;
+SHD_CM := PF1 > 10500.0;
 
 (* --- AUX FLOW ALARM (ADDED 2011) --- *)
 IF AI_77 > 0.0 THEN

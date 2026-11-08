@@ -29,20 +29,20 @@ def _segments(rng: random.Random, n: int, make):
 
 
 def gen_inputs(rng: random.Random, scans: int, heavy_start: bool) -> list[dict]:
-    temp, seq = 7.0, []
+    temp, seq = 25.0, []
 
     def temp_seg(r, k):
         nonlocal temp
         mode = r.choices(["flat", "rise", "fall"], [0.4, 0.4, 0.2])[0]
-        slope = {"flat": 0.0, "rise": r.uniform(0.05, 0.35), "fall": -r.uniform(0.02, 0.1)}[mode]
+        slope = {"flat": 0.0, "rise": r.uniform(0.01, 0.07), "fall": -r.uniform(0.005, 0.03)}[mode]
         vals = []
         for _ in range(k):
-            temp = min(30.0, max(3.0, temp + slope + (r.uniform(-0.02, 0.02) if mode == "flat" else 0.0)))
+            temp = min(45.0, max(15.0, temp + slope + (r.uniform(-0.004, 0.004) if mode == "flat" else 0.0)))
             vals.append(temp)
         return vals
 
     temps = _segments(rng, scans, temp_seg)
-    power = _segments(rng, scans, lambda r, k: [r.choice([300.0, 900.0, 1700.0, 1849.0, 1851.0, 2100.0]) + r.uniform(-30, 30)] * k)
+    power = _segments(rng, scans, lambda r, k: [r.choice([2000.0, 4500.0, 9000.0, 10499.0, 10501.0, 12000.0]) + r.uniform(-100, 100)] * k)
     loads = _segments(rng, scans, lambda r, k: [r.choice([15.0, 55.0, 79.9, 80.0, 95.0, 100.0])] * k)
     if heavy_start:
         loads[:110] = [95.0] * 110
@@ -78,7 +78,7 @@ def run_parity(prog, hooks: dict, glossary: dict, modern_source: str, rule_ids: 
         seq = gen_inputs(rng, scans, heavy_start=(si % 3 == 0))
         if long_run:  # force an early trip so the lockout expiry path is exercised
             for k in range(5, 40):
-                seq[k]["chw_supply_temp_c"] = 7.0 + 0.2 * (k - 4)
+                seq[k]["chw_supply_temp_c"] = 25.0 + 0.05 * (k - 4)
             for k in range(40, 400):
                 seq[k]["chw_supply_temp_c"] = seq[39]["chw_supply_temp_c"]
         legacy, modern = LegacyController(prog, hooks), Modern()

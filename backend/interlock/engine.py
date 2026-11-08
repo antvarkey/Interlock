@@ -38,6 +38,15 @@ def _fmt(n: float, digits: int = 0) -> str:
     return f"{n:,.{digits}f}"
 
 
+def _mw(kw: float) -> str:
+    """Power for people: 8,300 kW reads as 8.3 MW."""
+    return f"{kw / 1000:,.1f} MW" if abs(kw) >= 1000 else f"{kw:,.0f} kW"
+
+
+FINAL_CALL_LEAD_S = 60      # final-call alert this long before the last safe moment to act
+RAMP_DETECT_KW_3S = 1000.0  # live alert when facility power rises this much within 3 s
+
+
 class Interlock:
     def __init__(self, legacy_dir: str | Path | None = None, params: PlantParams | None = None,
                  rewrite: str | None = None):
@@ -99,7 +108,7 @@ class Interlock:
             "glossary": self.legacy["glossary"],
             "tickets": self.legacy["tickets"],
             "facts": self.facts,
-            "plant": self.params.__dict__,
+            "plant": {**self.params.__dict__, "duration_s": self.params.duration_s},
         }
 
     # ------------------------------------------------------------ parity
@@ -198,7 +207,7 @@ class Interlock:
                 "level": "ok", "kind": "prewarning", "prediction": pred,
                 "title": "No protective rule is predicted to fire at job start",
                 "summary": (f"Simulated with the current plan: peak supply temperature {pred['peak_temp_c']} °C, "
-                            f"peak facility power {_fmt(pred['peak_facility_kw'])} kW."),
+                            f"peak facility power {_mw(pred['peak_facility_kw'])}."),
                 "rule": None, "evidence": [], "steps": [], "watchouts": [],
             }
         rid = pred["primary"]["rule"]
@@ -207,8 +216,10 @@ class Interlock:
         what = rule["interrupts"][0] if rule["interrupts"] else "a protective action runs"
         n = pred["trip_after_start_s"]
         evidence = [
-            f"The job takes IT power from {_fmt(p.idle_kw)} kW to {_fmt(pred['peak_it_kw'])} kW in about {p.ramp_s} s.",
-            f"One chiller can remove about {_fmt(cap_kw)} kW, so heat exceeds cooling by about {_fmt(pred['peak_it_kw'] - cap_kw)} kW.",
+            f"The job takes IT load from {_mw(p.idle_kw)} to {_mw(pred['peak_it_kw'])} in about {p.ramp_s} s.",
+            f"One chiller can remove about {_mw(cap_kw)}, so heat exceeds cooling by about {_mw(pred['peak_it_kw'] - cap_kw)}.",
+            f"A second chiller needs about {p.ch2_delay_s} s to start and {p.ch2_ramp_s} s more to reach full capacity, "
+            f"and the controller only stages it after chiller 1 has been heavily loaded for 90 s (rule R4).",
             f"Rule {rid} (lines {rule['lines'][0]}-{rule['lines'][1]}) acts about {n} s after the job starts.",
         ]
         if pred["shutdown_t"]:
@@ -227,11 +238,42 @@ class Interlock:
             "tickets": rule["tickets"],
         }
 
+    def final_call(self, profile: str, manual_lead_s: int | None, manual_at: int | None) -> dict | None:
+        """The last alert that can still prevent the trip. Interlock knows when the job will start
+        (from the scheduler), so it can count down to the latest moment a fix still works, before
+        any power ramp is visible. Computed from the plan without a mid-run override, so the
+        history stays the same when an operator acts on it."""
+        if manual_lead_s is not None:
+            return None  # chiller 2 is pre-started by the plan
+        base = self.predict(profile)
+        if not base["will_trip"] or not self.rule_by_id[base["primary"]["rule"]]["mitigations"]:
+            return None
+        latest = self.latest_safe_manual_start(profile)
+        if latest is None:
+            return None
+        t = max(0, latest - FINAL_CALL_LEAD_S)
+        if manual_at is not None and manual_at <= t:
+            return None  # the operator acted before the final call was due
+        rid = base["primary"]["rule"]
+        rule = self.rule_by_id[rid]
+        what = rule["interrupts"][0] if rule["interrupts"] else "a protective action runs"
+        p = self.params
+        return {
+            "level": "critical", "kind": "final_call", "t": t, "deadline": latest, "act_within_s": latest - t,
+            "eta_s": base["primary"]["t"] - t, "job_in_s": p.job_start_s - t,
+            "title": f"Last chance: {what} about {base['trip_after_start_s']} s after the job starts",
+            "summary": rule["english"], "rule": self._rule_brief(rid),
+            "steps": [{"id": "start_ch2_now", "title": "Start chiller 2 now (manual override)",
+                       "how": f"Verified in simulation to avoid the trip if done within {latest - t} s. "
+                              f"Chiller 2 needs about {p.ch2_delay_s} s to start, so after that it cannot help in time.",
+                       "avoids_trip": True}],
+        }
+
     def live_alert(self, run, pred: dict, profile: str) -> dict | None:
         """Raised when the power ramp is detected. Says how long is left to act."""
         p = self.params
         fac = run.fac_kw
-        t_detect = next((t for t in range(3, len(fac)) if fac[t] - fac[t - 3] >= 100.0), None)
+        t_detect = next((t for t in range(3, len(fac)) if fac[t] - fac[t - 3] >= RAMP_DETECT_KW_3S), None)
         if t_detect is None:
             return None
         if not pred["will_trip"]:
@@ -281,11 +323,14 @@ class Interlock:
         events.append({"t": 0, "type": "prewarning", "level": baseline["level"], "title": f"Pre-warning: {baseline['title']}"})
         if profile == "staged":
             events.append({"t": 0, "type": "action", "level": "info",
-                           "title": "Scheduler starts the job in two stages (half power for 150 s, then full)"})
+                           "title": f"Scheduler starts the job in two stages (half power for {p.staged_hold_s} s, then full)"})
         if manual_at is not None:
             events.append({"t": manual_at, "type": "action", "level": "info",
                            "title": "Operator turns on the manual chiller 2 start override"})
         latest_safe = self.latest_safe_manual_start(profile) if pred["will_trip"] or manual_at is not None else None
+        final = self.final_call(profile, manual_lead_s, manual_at)
+        if final:
+            events.append({"t": final["t"], "type": "final_call", "level": "critical", "title": final["title"]})
         live = self.live_alert(run, pred, profile)
         if live:
             events.append({"t": live["t"], "type": "live_alert", "level": live["level"], "title": live["title"]})
@@ -306,7 +351,7 @@ class Interlock:
         events.sort(key=lambda e: (e["t"], e["type"] != "prewarning"))
         return {
             "profile": profile, "manual_ch2_at": manual_at, "prediction": pred, "events": events,
-            "prewarning": baseline, "live_alert": live,
+            "prewarning": baseline, "final_call": final, "live_alert": live,
             "series": {
                 "t": run.t, "temp": run.temp, "it_kw": run.it_kw, "fac_kw": run.fac_kw, "cool_kw": run.cool_kw,
                 "cap_kw": run.cap_kw, "pumps": run.pumps, "ch2_running": run.ch2_running,

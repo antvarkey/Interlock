@@ -51,7 +51,7 @@ export default function Chart({ height = 220, duration, jobStart, yMin, yMax, un
           {ticks.map((v) => <line key={v} x1={L} x2={w - R} y1={Y(v)} y2={Y(v)} />)}
         </g>
         <g className="axis">
-          {ticks.map((v) => <text key={v} x={L - 8} y={Y(v) + 3.5} textAnchor="end">{unit === "kW" ? fmt(v) : v}</text>)}
+          {ticks.map((v) => <text key={v} x={L - 8} y={Y(v) + 3.5} textAnchor="end">{fmt(v, Number.isInteger(v) ? 0 : 1)}</text>)}
           {xt.map((t) => (
             <text key={t} x={X(t)} y={height - 6} textAnchor="middle">
               {t === jobStart ? "T+0" : `${t > jobStart ? "+" : "−"}${Math.abs(t - jobStart)}`}

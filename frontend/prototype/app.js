@@ -1,5 +1,8 @@
 (() => {
-const { D, P, fmt, Run, forecast, actWithin, prewarning, parityTest, BUGS, ruleById } = IL;
+const { D, P, fmt, Run, forecast, actWithin, latestSafe, prewarning, parityTest, BUGS, ruleById } = IL;
+const mw = (kw, d = 1) => fmt(kw / 1000, d);
+/* A chiller needs ~45 s to start, so the act-now window is before the job starts: the final call. */
+const LATEST = latestSafe("single"), FINAL = LATEST === null ? null : Math.max(0, LATEST - 60);
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const JS = P.job_start_s;
@@ -137,7 +140,7 @@ function pick(choice) {
   closeModal();
   if (choice === "cancel") { S.phase = "idle"; syncButtons(); return; }
   S.plan = { lead: null, staged: false };
-  if (choice === "prestart" || choice === "both") S.plan.lead = 60;
+  if (choice === "prestart" || choice === "both") S.plan.lead = 120;
   if (choice === "staged" || choice === "both") S.plan.staged = true;
   startRun(choice);
 }
@@ -146,7 +149,7 @@ function pick(choice) {
 function startRun(choice) {
   S.run = new Run(S.plan.staged ? "staged" : "single");
   if (S.plan.lead) S.run.manualAt = JS - S.plan.lead;
-  S.events = []; S.seen = {}; S.alert = null; S.alertDone = false; S.acked = false; S.skip = false; S.handoff = null; S.outcome = null;
+  S.events = []; S.seen = {}; S.alert = null; S.alertDone = false; S.rampDone = false; S.acked = false; S.skip = false; S.handoff = null; S.outcome = null;
   S.phase = "running"; syncButtons();
   const label = { prestart: "Plan applied: pre-start chiller 2 one minute before the job", staged: "Plan applied: start the job in two stages", both: "Plan applied: pre-start chiller 2 and start in two stages", ignore: "Operator chose to start without changes" }[choice];
   logEvent(0, choice === "ignore" ? "warn" : "action", label);
@@ -172,7 +175,7 @@ function syncButtons() {
     : manualOn || (S.run && S.run.manualAt !== null) ? "Chiller 2 override is on or scheduled."
     : "If an alert appears, turning on chiller 2 early is the fix. The sooner, the better.";
   const g = $("#jobSub");
-  g.textContent = S.phase === "idle" ? `Hall is idle at ${fmt(P.idle_kw)} kW. A training job will take it to ${fmt(P.full_kw)} kW in about ${P.ramp_s} seconds, starting ${JS} s from now.`
+  g.textContent = S.phase === "idle" ? `Hall is idle at ${mw(P.idle_kw)} MW. A training job will take it to ${mw(P.full_kw)} MW in about ${P.ramp_s} seconds, starting ${JS / 60} min from now.`
     : S.phase === "warning" ? "Waiting on the pre-warning."
     : S.phase === "running" ? "Simulation running. Time is shown relative to the job start (T+0)."
     : "Run finished.";
@@ -197,9 +200,9 @@ function mitigated() { return S.run.manualAt !== null || S.run.profile === "stag
 function speed() {
   if (S.skip) return 250;
   const t = S.run.t;
+  if (S.alert && !S.alert.closed) return 4;
   if (t < JS - 4) return 25;
-  if (t < JS - 1) return 3;
-  if (!mitigated() && !S.alertDone && t < JS + 7) return 0.7;
+  if (t < JS + 4) return 2.5;
   if (t < JS + 30) return 4;
   if (t < JS + 120) return 14;
   return 30;
@@ -207,8 +210,9 @@ function speed() {
 function tick() {
   const r = S.run, f = r.step(), ts = r.t - 1, pl = r.pl, s = r.series;
   if (S.plan.lead && ts === r.manualAt) logEvent(ts, "action", "Chiller 2 manual override ON (per the verified plan)");
-  if (ts === JS) logEvent(ts, "info", `Training job started. IT power ramping from ${fmt(P.idle_kw)} kW to ${fmt(P.full_kw)} kW`);
-  if (!S.alertDone && !mitigated() && ts >= 3 && s.fac[ts] - s.fac[ts - 3] > 100) liveAlert(ts);
+  if (ts === JS) logEvent(ts, "info", `Training job started. IT load ramping from ${mw(P.idle_kw)} MW to ${mw(P.full_kw)} MW`);
+  if (!S.alertDone && !mitigated() && ts === FINAL) finalCall(ts);
+  if (!S.rampDone && !mitigated() && ts >= 3 && s.fac[ts] - s.fac[ts - 3] > 1000) liveAlert(ts);
   for (const id of f) {
     const first = !S.seen[id]; S.seen[id] = true;
     if (id === "R1" && first) {
@@ -219,14 +223,14 @@ function tick() {
       notify({ sev: "ok", title: "Cooling restarting", body: "The restart lockout ended (rule R3). The job was lost and must be restarted by the scheduler." });
     } else if (id === "R5" && first) logEvent(ts, "info", "Rule R5: manual chiller 2 start accepted");
     else if (id === "R4" && first) logEvent(ts, "info", "Rule R4: chiller 1 busy for 90 s, chiller 2 staged in automatically");
-    else if (id === "R6" && first) { logEvent(ts, "warn", `Rule R6: facility power over ${fmt(D.facts.power_cap_kw)} kW, load shed 15%`); notify({ sev: "warn", title: "Load shed (rule R6)", body: `Facility power passed the ${fmt(D.facts.power_cap_kw)} kW cap.` }); }
+    else if (id === "R6" && first) { logEvent(ts, "warn", `Rule R6: facility power over ${mw(D.facts.power_cap_kw)} MW, load shed 15%`); notify({ sev: "warn", title: "Load shed (rule R6)", body: `Facility power passed the ${mw(D.facts.power_cap_kw)} MW cap.` }); }
   }
   if (!S.seen.throttle && pl.temp >= P.throttle_c) {
-    S.seen.throttle = true; logEvent(ts, "warn", "Supply water at 15 °C: GPUs throttling");
-    notify({ sev: "warn", title: "GPUs throttling", body: "Supply water reached 15 °C. Training speed is dropping." });
+    S.seen.throttle = true; logEvent(ts, "warn", `Supply water at ${P.throttle_c} °C: GPUs throttling`);
+    notify({ sev: "warn", title: "GPUs throttling", body: `Supply water reached ${P.throttle_c} °C. Training speed is dropping.` });
   }
   if (!S.seen.shutdown && pl.shutdown) {
-    S.seen.shutdown = true; logEvent(ts, "crit", "Supply water at 18 °C: GPU thermal shutdown. The job is lost");
+    S.seen.shutdown = true; logEvent(ts, "crit", `Supply water at ${P.shutdown_c} °C: GPU thermal shutdown. The job is lost`);
     notify({ sev: "crit", title: "GPU thermal shutdown", body: "The job was lost. It cannot restart until cooling is back and the lockout ends.", sticky: true });
   }
   if (S.alert && !S.alert.closed && r.t > S.alert.deadline) {
@@ -235,13 +239,30 @@ function tick() {
     logEvent(ts, "crit", "The window to prevent the trip closed");
   }
 }
+function finalCall(ts) {
+  S.alertDone = true;
+  const left = LATEST - ts, toJob = JS - ts;
+  const title = "Final call: start chiller 2 now";
+  logEvent(ts, "crit", `Final call: the job starts in ${toJob} s and rule R1 will stop the cooling loop`);
+  const n = notify({
+    sev: "crit", title, sticky: true, pulse: true,
+    body: `The job starts in ${toJob} s. One chiller cannot carry ${mw(P.full_kw)} MW, and a second chiller needs about ${P.ch2_delay_s} s to start. Acting in the next ${left} s still prevents the trip.`,
+    actions: [{ label: "Start chiller 2 now", cls: "danger", fn: () => $("#opCh2").click(), keep: true }, { label: "Acknowledge", fn: () => $("#opAck").click(), keep: true }],
+  });
+  const cd = document.createElement("div"); cd.className = "cd";
+  n.el.querySelector(".slot").appendChild(cd);
+  S.alert = { toast: n, deadline: LATEST, closed: false };
+  syncButtons();
+}
 function liveAlert(ts) {
+  S.rampDone = true;
+  if (S.alert && !S.alert.closed) return; // the final call is still open and says more
   S.alertDone = true;
   const w = actWithin(S.run);
   const deadline = w === null ? -1 : S.run.t + w;
   const title = w === null ? "Power spike: cooling trip is now unavoidable" : "Power spike detected: cooling trip coming";
-  const body = w === null ? `Facility power jumped ${fmt(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} kW in 3 s. Heat now exceeds what one chiller can remove. Expect GPU throttling and a ${D.facts.lockout_s} s restart block.`
-    : `Facility power jumped ${fmt(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} kW in 3 s. One chiller cannot keep up, and rule R1 will stop the cooling loop. Turning on chiller 2 now still prevents it.`;
+  const body = w === null ? `Facility power jumped ${mw(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} MW in 3 s. Heat now exceeds what one chiller can remove. Expect GPU throttling and a ${D.facts.lockout_s} s restart block.`
+    : `Facility power jumped ${mw(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} MW in 3 s. One chiller cannot keep up, and rule R1 will stop the cooling loop. Turning on chiller 2 now still prevents it.`;
   logEvent(ts, "crit", title);
   const n = notify({
     sev: "crit", title, body, sticky: true, pulse: true,
@@ -296,7 +317,7 @@ function buildHandoff() {
   L.push(`  Matches past incidents: ${r1.tickets.map((t) => t.id).join(", ")}.`);
   L.push("");
   L.push("FOLLOW-UPS");
-  L.push("  1. Before every cluster start from idle: turn on the chiller 2 manual override at least 60 s early, or have the scheduler start the job at half power for 150 s.");
+  L.push("  1. Before every cluster start from idle: turn on the chiller 2 manual override at least 2 min early, or have the scheduler start the job at half power for 4 min.");
   r1.findings.forEach((f, i) => L.push(`  ${i + 2}. ${f.text}`));
   const n = r1.findings.length + 2;
   D.findings.filter((f) => !f.rules.includes("R1")).forEach((f, i) => L.push(`  ${n + i}. ${f.text}`));
@@ -336,9 +357,9 @@ function renderTiles() {
   const T = (k, v, s, cl = "") => `<div class="tile ${cl}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
   $("#tiles").innerHTML =
     T("Supply temp", `${pl.temp.toFixed(1)} °C`, `setpoint ${P.setpoint_c} °C`, cls) +
-    T("IT power", `${fmt(pl.it)} kW`, pl.shutdown ? "GPUs shut down" : pl.temp >= P.throttle_c ? "GPUs throttled" : "heat to remove", pl.shutdown ? "crit" : pl.temp >= P.throttle_c ? "warn" : "") +
-    T("Cooling capacity", `${fmt(pl.pumpOn ? pl.cap : 0)} kW`, "available now", !pl.pumpOn ? "crit" : "") +
-    T("Facility power", `${fmt(pl.fac)} kW`, `cap ${fmt(D.facts.power_cap_kw)} kW`, pl.fac > D.facts.power_cap_kw ? "crit" : pl.fac > D.facts.power_cap_kw - 100 ? "warn" : "") +
+    T("IT load", `${mw(pl.it, 2)} MW`, pl.shutdown ? "GPUs shut down" : pl.temp >= P.throttle_c ? "GPUs throttled" : "heat to remove", pl.shutdown ? "crit" : pl.temp >= P.throttle_c ? "warn" : "") +
+    T("Cooling capacity", `${mw(pl.pumpOn ? pl.cap : 0)} MW`, "available now", !pl.pumpOn ? "crit" : "") +
+    T("Facility power", `${mw(pl.fac, 2)} MW`, `cap ${mw(D.facts.power_cap_kw)} MW`, pl.fac > D.facts.power_cap_kw ? "crit" : pl.fac > D.facts.power_cap_kw - 400 ? "warn" : "") +
     T("Chiller 2", ch2[0], "second chiller", ch2[1]) +
     T("Cooling loop", loop[0], loop[2], loop[1]);
   $("#clock").textContent = S.run ? rel(Math.max(0, S.run.t - 1)) : rel(0);
@@ -351,13 +372,13 @@ function chart(cv, { series, hlines = [], yMin, yMax, unit, upTo }) {
   if (!W) return;
   cv.width = W * dpr; cv.height = H * dpr;
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const L = 46, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B, N = P.duration_s;
+  const L = 52, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B, N = P.duration_s;
   const X = (i) => L + (i / (N - 1)) * pw, Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
   g.font = "11px " + css("--mono"); g.fillStyle = css("--ink2"); g.strokeStyle = css("--line"); g.lineWidth = 1;
   for (let k = 0; k <= 4; k++) {
     const v = yMin + ((yMax - yMin) * k) / 4, y = Y(v);
     g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke();
-    g.textAlign = "right"; g.fillText(unit === "kW" ? fmt(v) : v.toFixed(0), L - 6, y + 4);
+    g.textAlign = "right"; g.fillText(unit === "kW" ? fmt(v / 1000) + " MW" : v.toFixed(0), L - 6, y + 4);
   }
   g.textAlign = "center";
   for (let tt = JS - 60; tt <= N; tt += 60) { if (tt < 0) continue; g.fillText(tt === JS ? "T+0" : (tt - JS > 0 ? "+" : "−") + Math.abs(tt - JS), X(tt), H - 6); }
@@ -375,9 +396,9 @@ function chart(cv, { series, hlines = [], yMin, yMax, unit, upTo }) {
 function draw() {
   if ($("#pane-live").hidden) return;
   const s = S.run ? S.run.series : { temp: [], it: [], cap: [], fac: [] }, n = s.temp.length;
-  chart($("#c1"), { yMin: 5, yMax: 20, unit: "C", upTo: n, hlines: [{ y: P.throttle_c, color: "--warn" }, { y: P.shutdown_c, color: "--crit" }],
+  chart($("#c1"), { yMin: 22, yMax: 38, unit: "C", upTo: n, hlines: [{ y: P.throttle_c, color: "--warn" }, { y: P.shutdown_c, color: "--crit" }],
     series: [{ data: S.ghost.temp, color: "--ink2", dash: [6, 5], w: 1.8 }, { data: s.temp, color: "--accent", live: true }] });
-  chart($("#c2"), { yMin: 0, yMax: 2000, unit: "kW", upTo: n, hlines: [{ y: D.facts.power_cap_kw, color: "--crit" }],
+  chart($("#c2"), { yMin: 0, yMax: 12000, unit: "kW", upTo: n, hlines: [{ y: D.facts.power_cap_kw, color: "--crit" }],
     series: [{ data: s.cap, color: "--ok", live: true }, { data: s.fac, color: "--info", live: true, w: 1.6 }, { data: s.it, color: "--accent", live: true }] });
 }
 new ResizeObserver(draw).observe($("#pane-live"));

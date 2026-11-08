@@ -1,14 +1,28 @@
 /* The live scenario: queue a job, show the pre-warning, play the backend's simulation forward,
-   raise the live alert with an act-within countdown, and let the operator step in.
+   raise the final-call and ramp alerts, and let the operator step in.
 
    The backend simulation is deterministic for a given plan. When the operator turns on the
    chiller 2 override mid-run, we ask the backend to re-simulate with `manual_at` = the next
    second. The history before that second is identical (checked in backend tests), so playback
-   just continues on the new timeline. */
+   just continues on the new timeline.
+
+   Alerts:
+   - final call: the scheduler knows when the job starts, so Interlock counts down to the last
+     moment a fix still works (a chiller needs ~45 s to start). This is the act-within window.
+   - ramp alert: when facility power jumps. By then the trip is unavoidable; it tells operators
+     to prepare to recover. */
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { api } from "./api.js";
 import { unlock } from "./audio.js";
-import { fmt, rel } from "./format.js";
+import { fmt, mw, rel } from "./format.js";
+
+export const PACES = [
+  { id: "demo", label: "Demo pace" },
+  { id: "1", label: "Real time" },
+  { id: "2", label: "2×" },
+  { id: "5", label: "5×" },
+  { id: "10", label: "10×" },
+];
 
 const fresh = () => ({
   phase: "idle", // idle | briefing | running | done
@@ -18,7 +32,7 @@ const fresh = () => ({
   t: 0,
   processed: -1,
   log: [],
-  alert: null, // { state: active|closed|tripped|resolved|recovered|clear, ... }
+  alert: null, // { kind: final|ramp, state: active|closed|tripped|resolved|recovered|clear, ... }
   overrideAt: null,
   acked: false,
   busy: false,
@@ -28,24 +42,15 @@ const fresh = () => ({
   lastCd: null,
 });
 
-const PLAN_LABEL = {
-  prestart: "Plan applied: pre-start chiller 2 one minute before the job",
-  staged: "Plan applied: start the job in two stages",
-  both: "Plan applied: pre-start chiller 2 and start in two stages",
-  ignore: "Operator chose to start without changes",
-};
-
-export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }) {
+export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab, config }) {
   const M = useRef(fresh());
+  const cfg = useRef(config);
+  cfg.current = config;
   const [, render] = useReducer((x) => x + 1, 0);
-  const js = () => M.current.sim?.job_start ?? 90;
+  const js = () => M.current.sim?.job_start ?? cfg.current.jobStart;
   const at = (t) => rel(t, js());
 
   const log = (t, kind, text) => { M.current.log = [{ t, kind, text }, ...M.current.log]; };
-  const mitigated = () => {
-    const m = M.current;
-    return m.plan.lead != null || m.plan.profile === "staged" || m.overrideAt != null;
-  };
 
   /* ---------------------------------------------------------------- operator actions */
   const override = useCallback(async () => {
@@ -55,7 +60,7 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
     if (when >= m.sim.duration) return;
     m.busy = true; render();
     try {
-      const next = await api.simulate({ profile: m.plan.profile, manual_at: when });
+      const next = await api.simulate({ profile: m.plan.profile, manual_at: when, job_start_s: cfg.current.jobStart });
       m.sim = next; m.overrideAt = when;
       log(when, "action", "Operator turned on the chiller 2 manual override");
       const p = next.prediction;
@@ -63,7 +68,7 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
         if (m.alert && ["active", "closed"].includes(m.alert.state)) m.alert = { ...m.alert, state: "resolved", resolvedAt: when };
         dismissKey("live");
         notify({ sev: "ok", title: m.alert ? "Override accepted: trip avoided" : "Chiller 2 override on", at: at(when),
-          body: `Forecast: no protective rule fires. Peak supply temperature ${fmt(p.peak_temp_c, 1)} °C, peak facility power ${fmt(p.peak_facility_kw)} kW.` });
+          body: `Forecast: no protective rule fires. Peak supply temperature ${fmt(p.peak_temp_c, 1)} °C, peak facility power ${mw(p.peak_facility_kw)} MW.` });
       } else {
         const eta = p.primary.t - when;
         notify({ sev: "warn", title: "Override on, but too late to prevent the trip", at: at(when),
@@ -96,22 +101,36 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
         log(e.t, "action", e.title);
         if (e.t > 0) notify({ sev: "info", title: "Chiller 2 override on (per the verified plan)", body: "A second chiller is starting before the ramp arrives.", at: at(e.t), silent: true });
         break;
+      case "final_call": {
+        const fc = sim.final_call;
+        log(e.t, "crit", `Final call: ${fc.title.replace(/^Last chance: /, "")}`);
+        m.alert = { kind: "final", state: "active", t: fc.t, deadline: fc.deadline, tripAt: sim.prediction.primary?.t ?? fc.t + fc.eta_s,
+          rule: fc.rule, title: fc.title, summary: fc.summary, steps: fc.steps };
+        m.acked = false;
+        notify({
+          key: "live", sev: "crit", sticky: true, pulse: true, at: at(e.t),
+          title: "Final call: start chiller 2 now",
+          body: `The job starts in ${fc.job_in_s} s. Rule ${fc.rule.id} will stop the cooling loop about ${fc.eta_s - fc.job_in_s} s after that. A chiller needs about 45 s to start.`,
+          actions: [{ label: "Start chiller 2 now", cls: "danger", fn: override, keep: true }, { label: "Acknowledge", fn: ack, keep: true }],
+        });
+        break;
+      }
       case "live_alert": {
         const la = sim.live_alert;
         log(e.t, la.level === "critical" ? "crit" : "ok", la.title);
         if (la.level !== "critical") {
-          m.alert = { state: "clear", t: la.t, title: la.title, summary: la.summary };
-          notify({ sev: "info", title: "Power ramp detected", body: la.summary, at: at(e.t) });
+          if (!m.alert || m.alert.state !== "resolved") m.alert = { kind: "ramp", state: "clear", t: la.t, title: la.title, summary: la.summary };
+          notify({ sev: "info", title: "Power ramp detected", body: la.summary, at: at(e.t), silent: true });
           break;
         }
         const deadline = la.act_within_s != null ? la.t + la.act_within_s : null;
-        m.alert = { state: deadline != null ? "active" : "closed", t: la.t, deadline, tripAt: sim.prediction.primary?.t,
+        m.alert = { kind: "ramp", state: deadline != null ? "active" : "closed", t: la.t, deadline, tripAt: sim.prediction.primary?.t,
           rule: la.rule, title: la.title, summary: la.summary, steps: la.steps };
         const jump = sim.series.fac_kw[la.t] - sim.series.fac_kw[Math.max(0, la.t - 3)];
         notify({
           key: "live", sev: "crit", sticky: true, pulse: true, at: at(e.t),
           title: deadline != null ? "Power spike: cooling trip coming" : "Power spike: cooling trip now unavoidable",
-          body: `Facility power jumped ${fmt(jump)} kW in 3 s. Rule ${la.rule.id} stops the cooling loop in about ${la.eta_s} s.`,
+          body: `Facility power jumped ${mw(jump)} MW in 3 s. Rule ${la.rule.id} stops the cooling loop in about ${la.eta_s} s.${deadline == null ? " Checkpoint jobs and prepare to recover." : ""}`,
           actions: deadline != null
             ? [{ label: "Start chiller 2 now", cls: "danger", fn: override, keep: true }, { label: "Acknowledge", fn: ack, keep: true }]
             : [{ label: "Acknowledge", fn: ack, keep: true }],
@@ -132,11 +151,13 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
         }
         break;
       }
-      case "impact":
-        log(e.t, /shut down/.test(e.title) ? "crit" : "warn", e.title);
-        notify({ sev: /shut down/.test(e.title) ? "crit" : "warn", at: at(e.t), title: e.title, sticky: /shut down/.test(e.title),
-          body: /shut down/.test(e.title) ? "The job is lost. It cannot restart until cooling is back and the lockout ends." : "Training speed is dropping." });
+      case "impact": {
+        const sd = /shut down/.test(e.title);
+        log(e.t, sd ? "crit" : "warn", e.title);
+        notify({ key: sd ? "shutdown" : undefined, sev: sd ? "crit" : "warn", at: at(e.t), title: e.title, sticky: sd,
+          body: sd ? "The job is lost. It cannot restart until cooling is back and the lockout ends." : "Training speed is dropping." });
         break;
+      }
       case "recovery":
         log(e.t, "ok", e.title);
         if (m.alert) m.alert = { ...m.alert, state: "recovered" };
@@ -170,20 +191,22 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
     log(s.duration - 1, m.outcome.tripped ? "crit" : "ok",
       m.outcome.tripped ? "Run complete: the job was lost to a cooling trip" : "Run complete: the job ran without a cooling trip");
     clearToasts(); // incident toasts are in the bell history and the event log now
-    notify({ sev: m.outcome.tripped ? "warn" : "ok", title: "Shift handoff ready", body: "Cause, actions taken and follow-ups for the next shift.",
+    notify({ sev: m.outcome.tripped ? "warn" : "ok", title: "Shift handoff ready", body: "Cause, actions taken, follow-ups, and a root cause analysis report.",
       actions: [{ label: "Open handoff", cls: "primary", fn: () => goTab("handoff") }] });
   };
 
   /* ---------------------------------------------------------------- pacing */
   const speed = (t) => {
     const m = M.current, j = js();
-    if (m.skip) return 320;
-    if (t < j - 4) return 22;
-    if (t < j - 1) return 3;
-    if (!mitigated() && t < j + 6) return 0.6; // slow down so the act-within window is usable
-    if (t < j + 35) return 4;
-    if (t < j + 120) return 12;
-    return 28;
+    if (m.skip) return 400;
+    const pace = cfg.current.pace;
+    if (pace !== "demo") return Number(pace);
+    if (m.alert?.state === "active") return 4;      // the act-within window plays at 4x
+    if (t < j - 6) return 24;
+    if (t < j + 4) return 2.5;                       // slow down for the job start and ramp
+    if (t < j + 40) return 4;
+    if (t < j + 160) return 12;
+    return 24;
   };
 
   useEffect(() => {
@@ -216,11 +239,11 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
     const m = M.current;
     if (m.phase === "running" || m.phase === "briefing") return;
     try {
-      const pw = await api.prewarning({ profile: "single" });
+      const pw = await api.prewarning({ profile: "single", job_start_s: cfg.current.jobStart });
       M.current = { ...fresh(), prewarning: pw, phase: "briefing" };
       clearToasts();
       if (pw.level === "critical")
-        notify({ sev: "crit", title: `Pre-warning: ${pw.title}`, body: "Verified steps are ready. Review them before the job starts.", at: "T−90s" });
+        notify({ sev: "crit", title: `Pre-warning: ${pw.title}`, body: "Verified steps are ready. Review them before the job starts.", at: rel(0, cfg.current.jobStart) });
     } catch (e) {
       M.current.error = String(e.message || e);
     }
@@ -230,17 +253,25 @@ export function useScenario({ notify, dismissKey, patchKey, clearToasts, goTab }
   const choose = useCallback(async (choice) => {
     const m = M.current;
     if (choice === "cancel") { m.phase = "idle"; render(); return; }
+    const leadStep = m.prewarning?.steps?.find((s) => s.sim?.manual_ch2_lead_s);
+    const leadS = leadStep?.sim.manual_ch2_lead_s ?? 120;
     const plan = {
       profile: choice === "staged" || choice === "both" ? "staged" : "single",
-      lead: choice === "prestart" || choice === "both" ? 60 : null,
+      lead: choice === "prestart" || choice === "both" ? leadS : null,
       choice,
     };
+    const label = {
+      prestart: `Plan applied: pre-start chiller 2 ${leadS / 60} min before the job`,
+      staged: "Plan applied: start the job in two stages",
+      both: `Plan applied: pre-start chiller 2 and start in two stages`,
+      ignore: "Operator chose to start without changes",
+    }[choice];
     m.busy = true; render();
     try {
-      const sim = await api.simulate({ profile: plan.profile, manual_lead_s: plan.lead });
+      const sim = await api.simulate({ profile: plan.profile, manual_lead_s: plan.lead, job_start_s: cfg.current.jobStart });
       M.current = { ...fresh(), prewarning: m.prewarning, plan, sim, phase: "running" };
-      log(0, choice === "ignore" ? "warn" : "action", PLAN_LABEL[choice]);
-      notify({ sev: choice === "ignore" ? "warn" : "ok", title: choice === "ignore" ? "Starting without changes" : "Plan accepted", body: PLAN_LABEL[choice], silent: true, at: "T−90s" });
+      log(0, choice === "ignore" ? "warn" : "action", label);
+      notify({ sev: choice === "ignore" ? "warn" : "ok", title: choice === "ignore" ? "Starting without changes" : "Plan accepted", body: label, silent: true, at: rel(0, sim.job_start) });
     } catch (e) {
       m.busy = false; m.error = String(e.message || e);
     }

@@ -30,7 +30,7 @@ class ChwSequencer:
         self.reset()
 
     def reset(self) -> None:
-        self.chw_supply_temp_prev_c = 7.0
+        self.chw_supply_temp_prev_c = 25.0
         self.chw_supply_temp_rise_c = 0.0
         self.rise_counter = 0
         self.stage_delay_counter = 0
@@ -57,9 +57,9 @@ class ChwSequencer:
         self.chw_supply_temp_rise_c = chw_supply_temp_c - self.chw_supply_temp_prev_c
         # Supply temperature at the previous scan = chilled-water supply temperature.
         self.chw_supply_temp_prev_c = chw_supply_temp_c
-        # Counts consecutive scans while the supply temperature rise per scan is above 0.1 °C/s
+        # Counts consecutive scans while the supply temperature rise per scan is above 0.02 °C/s
         # (original line 38).
-        if self.chw_supply_temp_rise_c > 0.1:
+        if self.chw_supply_temp_rise_c > 0.02:
             self.rise_counter = self.rise_counter + 1
         else:
             self.rise_counter = 0
@@ -70,7 +70,7 @@ class ChwSequencer:
         else:
             self.stage_delay_counter = 0
         if (self.rise_counter >= 20) and (not self.cooling_loop_tripped):
-            # R1 (original lines 52-56): When the supply temperature rise per scan is above 0.1
+            # R1 (original lines 52-56): When the supply temperature rise per scan is above 0.02
             # °C/s for 20 consecutive scans (about 20 s) and the cooling loop is not tripped,
             # trip the cooling loop, set the restart lockout timer to 300 s, stop the cooling
             # pumps, and stop chiller 2.
@@ -104,8 +104,8 @@ class ChwSequencer:
             fired.append('R5')
             self.chiller2_start_cmd = True
         # R6 (original line 80): The load-shed command is on whenever the total facility power
-        # is above 1850 kW, and off otherwise.
-        self.load_shed_cmd = facility_power_kw > 1850.0
+        # is above 10500 kW, and off otherwise.
+        self.load_shed_cmd = facility_power_kw > 10500.0
         if self.load_shed_cmd:
             fired.append('R6')
         if aux_cond_flow_77 > 0.0:

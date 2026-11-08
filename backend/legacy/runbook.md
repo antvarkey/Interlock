@@ -11,10 +11,10 @@ The sequencer protects the pumps and the loop. Operators should not override it 
 
 | Parameter | Value |
 | --- | --- |
-| Rate-of-rise trip threshold | 0.15 °C/s |
+| Rate-of-rise trip threshold | 0.03 °C/s |
 | Chiller 2 staging delay | 90 seconds |
 | Restart lockout after a trip | 2 minutes |
-| Facility power cap | 1850 kW |
+| Facility power cap | 10500 kW |
 
 ## If the cooling loop trips
 

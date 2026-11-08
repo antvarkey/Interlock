@@ -59,13 +59,13 @@ const IL = (() => {
   /* ------------------------------------------------------------ rewritten controller (port of the generated Python) */
   const newCtrl = (cfg = {}) => ({
     cfg: { tripScans: 20, lockoutS: 300, ...cfg },
-    s: { prev: 7.0, rise: 0.0, riseCt: 0, stageCt: 0, lockout: 0, tripped: false, ch2Cmd: false, pumps: true, shed: false, alarm: false },
+    s: { prev: 25.0, rise: 0.0, riseCt: 0, stageCt: 0, lockout: 0, tripped: false, ch2Cmd: false, pumps: true, shed: false, alarm: false },
   });
   function ctrlStep(c, i) {
     const s = c.s, fired = [];
     s.rise = i.temp - s.prev;
     s.prev = i.temp;
-    s.riseCt = s.rise > 0.1 ? s.riseCt + 1 : 0;
+    s.riseCt = s.rise > 0.02 ? s.riseCt + 1 : 0;
     s.stageCt = i.ch1 >= 80.0 ? s.stageCt + 1 : 0;
     if (s.riseCt >= c.cfg.tripScans && !s.tripped) {
       fired.push("R1"); s.tripped = true; s.lockout = c.cfg.lockoutS; s.pumps = false; s.ch2Cmd = false;
@@ -76,7 +76,7 @@ const IL = (() => {
     }
     if (s.stageCt >= 90 && !s.tripped) { fired.push("R4"); s.ch2Cmd = true; }
     if (i.man && !s.tripped) { fired.push("R5"); s.ch2Cmd = true; }
-    s.shed = i.power > 1850.0;
+    s.shed = i.power > 10500.0;
     if (s.shed) fired.push("R6");
     if (i.aux > 0.0) { fired.push("R7"); s.alarm = true; }
     return { out: { ch2Cmd: s.ch2Cmd, pumps: s.pumps, shed: s.shed, alarm: s.alarm }, fired };
@@ -176,9 +176,19 @@ const IL = (() => {
   /* seconds from now during which turning on the manual override still avoids a trip */
   function actWithin(run) {
     let best = null;
-    for (let d = 0; d <= 60; d++) {
+    for (let d = 0; d <= 120; d++) {
       const r = run.fork(); r.manualAt = run.t + d;
       if (!forecast(r).willTrip) best = d;
+    }
+    return best;
+  }
+
+  /* latest second at which turning on the override still avoids the trip (same as the Python engine) */
+  function latestSafe(profile = "single") {
+    let best = null;
+    for (let at = 0; at < P.job_start_s + 40; at++) {
+      const r = new Run(profile); r.manualAt = at;
+      if (!forecast(r).willTrip) best = at;
     }
     return best;
   }
@@ -220,15 +230,15 @@ const IL = (() => {
   function genInputs(rnd, scans, heavy) {
     const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
     const seg = (make) => { const out = []; while (out.length < scans) out.push(...make(5 + Math.floor(rnd() * 36))); return out.slice(0, scans); };
-    let temp = 7.0;
+    let temp = 25.0;
     const temps = seg((k) => {
       const r = rnd(), mode = r < 0.4 ? "flat" : r < 0.8 ? "rise" : "fall";
-      const slope = mode === "flat" ? 0 : mode === "rise" ? 0.05 + rnd() * 0.3 : -(0.02 + rnd() * 0.08);
+      const slope = mode === "flat" ? 0 : mode === "rise" ? 0.01 + rnd() * 0.06 : -(0.005 + rnd() * 0.025);
       const v = [];
-      for (let i = 0; i < k; i++) { temp = Math.min(30, Math.max(3, temp + slope + (mode === "flat" ? (rnd() - 0.5) * 0.04 : 0))); v.push(temp); }
+      for (let i = 0; i < k; i++) { temp = Math.min(45, Math.max(15, temp + slope + (mode === "flat" ? (rnd() - 0.5) * 0.008 : 0))); v.push(temp); }
       return v;
     });
-    const power = seg((k) => Array(k).fill(pick([300, 900, 1700, 1849, 1851, 2100]) + (rnd() - 0.5) * 60));
+    const power = seg((k) => Array(k).fill(pick([2000, 4500, 9000, 10499, 10501, 12000]) + (rnd() - 0.5) * 200));
     const loads = seg((k) => Array(k).fill(pick([15, 55, 79.9, 80, 95, 100])));
     if (heavy) for (let i = 0; i < Math.min(110, scans); i++) loads[i] = 95;
     const man = seg((k) => Array(k).fill(rnd() < 0.15));
@@ -257,7 +267,7 @@ const IL = (() => {
           const long = i % 4 === 0, n = long ? 400 : 150;
           const seq = genInputs(rnd, n, i % 3 === 0);
           if (long) {
-            for (let k = 5; k < 40; k++) seq[k].temp = 7.0 + 0.2 * (k - 4);
+            for (let k = 5; k < 40; k++) seq[k].temp = 25.0 + 0.05 * (k - 4);
             for (let k = 40; k < n; k++) seq[k].temp = seq[39].temp;
           }
           const leg = new LegacyController(), mod = newCtrl(cfg);
@@ -285,6 +295,6 @@ const IL = (() => {
     });
   }
 
-  return { D, P, ruleById, protectiveIds, Run, LegacyController, newCtrl, ctrlStep, forecast, predictPlan, actWithin, prewarning, verifiedSteps, parityTest, BUGS, fmt, cap1 };
+  return { D, P, ruleById, protectiveIds, Run, LegacyController, newCtrl, ctrlStep, forecast, predictPlan, actWithin, latestSafe, prewarning, verifiedSteps, parityTest, BUGS, fmt, cap1 };
 })();
 if (typeof module !== "undefined") module.exports = IL;

@@ -12,10 +12,12 @@ Built for two hackathon tracks:
 
 ## The scenario it demonstrates
 
-An idle GPU cluster starts a large training job. IT power jumps from 180 kW to 1,400 kW in about 8 seconds. One
-chiller can only remove 900 kW, and the second chiller is not staged in until chiller 1 has been heavily loaded for
-90 seconds. The supply temperature rises faster than rule R1 allows, so R1 trips the cooling loop about 28 seconds
-after the job starts. Restart is then blocked for 300 seconds, and the GPUs shut down on over-temperature.
+One data hall: 64 liquid-cooled GPU racks (4,608 GPUs) fed by a chilled-water plant with evaporative cooling towers.
+The idle cluster starts a large training job, and IT load jumps from 2.1 MW to 8.3 MW in about 10 seconds. One chiller
+removes 4.5 MW. The second chiller is not staged in until chiller 1 has been heavily loaded for 90 seconds, and then
+needs about 45 seconds to start. The facility-water supply rises faster than rule R1 allows, so R1 trips the cooling
+loop about 29 seconds after the job starts. Restart is then blocked for 300 seconds, and the GPUs throttle and then
+shut down on over-temperature.
 
 Interlock finds R1 in the old code, predicts the trip from the job queue, and tells the operator what to do. It checks
 each recommended step in the plant simulator before suggesting it.
@@ -57,7 +59,7 @@ python -m interlock.cli demo                # the three job-start scenarios, as 
 python -m interlock.cli parity              # old-vs-new differential test (about 425,000 scans)
 python -m interlock.cli parity --bug lockout   # shows the test catching an injected change
 python -m interlock.cli build               # writes generated/modern_sequencer.py
-python -m pytest                            # 31 tests
+python -m pytest                            # 35 tests
 ```
 
 Dashboard end-to-end check (backend running and serving `frontend/dist`):
@@ -75,22 +77,54 @@ cooling fan that turns while the loop runs, turns faster when chiller 2 is helpi
 
 | Section | What it shows |
 | --- | --- |
-| 01 Live operations | Queue a job, pre-warning dialog with verified steps, live telemetry, charts against the "if nobody acts" forecast, and the live alert |
-| 02 Rules | The 7 extracted rules with source lines, legacy/rewrite code side by side, findings, incident tickets, Ask box |
-| 03 Verification | Parity test of the old code against the rewrite, rule coverage, "break it on purpose" buttons, where the AI is used |
-| 04 Shift handoff | Generated handoff: timeline including operator actions, root cause, earlier tickets, follow-ups. Pre-job briefing before a run |
+| 01 Live operations (main window) | Queue a job, pre-warning dialog with verified steps, job clock and playback settings, live telemetry, charts against the "if nobody acts" forecast, and the live alerts |
+| 02 Rules & verification | The 7 extracted rules with source lines, the Ask box, findings and incident tickets; the parity test, rule coverage, "break it on purpose" buttons, and the legacy and rewritten code |
+| 03 Shift handoff | Generated handoff: timeline with operator actions, root cause, earlier tickets, follow-ups, and the RCA report. Pre-job briefing before a run |
+
+**Rules from anywhere.** The `Rules` button in the top bar, and every `R1 · L52–56` tag, opens a drawer with the rule
+in plain English and its source lines, without leaving the page. "Open in new window" pops a rule out into its own
+window (`/?rule=R1`) so it can sit next to the dashboard.
+
+**Job clock.** Choose how long after queueing the job starts (2, 3, 5 or 10 minutes; 5 is the default) and the
+playback speed (demo pace, real time, 2×, 5×, 10×). The backend re-runs the plant for the chosen start time.
 
 **Live alerts.** The alert system has these parts:
 
 - **Pre-warning** when the job is queued: which rule fires, the evidence, matching incidents, and steps that are each
   checked in the simulator. The operator picks a plan, ignores it, or cancels.
-- **Live alert** when the power ramp is detected: an act-within countdown, the time to trip, and buttons to start
-  chiller 2 or acknowledge. Playback slows down inside the window so the operator can act.
+- **Final call** before the job starts. A chiller needs about 45 s to start, so once the power ramp is visible it is
+  already too late. The scheduler knows the start time, so Interlock counts down to the last moment a fix still works:
+  an act-within countdown, the time to trip, and buttons to start chiller 2 or acknowledge.
+- **Ramp alert** when facility power rises by 1 MW within 3 s. If the window has closed, it tells operators to
+  checkpoint jobs and prepare to recover.
 - **Operator override mid-run.** "Start chiller 2 now" re-simulates on the backend (`/api/simulate` with `manual_at`)
   and playback continues on the new timeline. Acting inside the window avoids the trip; acting late shortens the outage.
 - **Alert states:** armed, monitoring, act now, window closed, tripped (with the lockout countdown), recovering, resolved.
 - **Delivery:** toasts, a notification bell with history, alert tones, a red banner that shows on every tab, the
   browser tab title, the phase stepper and the logo fan.
+
+**Root cause analysis report.** After a run, the Shift handoff page downloads a PDF or Word report (`/api/report`):
+executive summary, major events, timeline with operator actions, a Pareto chart of incidents by cause, five whys,
+evidence from the legacy code with line numbers, corrective and preventive actions with owners, and assumptions. It is
+built from the run, the extracted rules and the tickets, not written by a language model, and marked as a draft for
+engineering review.
+
+## Plant model
+
+The plant is sized like one hall of a large GPU deployment. What is verified and what is assumed:
+
+| | Value in the model | Basis |
+| --- | --- | --- |
+| Site context | One hall, Spartanburg-style HPC campus | NMC² is building in stages at 4000 S. Pine St, Spartanburg, first stage planned for Q3 2026, initially permitted for 48 MW of on-site gas generation and applying for more than 450 MW ([Post and Courier](https://www.postandcourier.com/spartanburg/news/spartanburg-data-center-northmark-water-power/article_07cc2de8-9eb6-4711-ad7f-90ef8230b158.html), [Compute Atlas](https://www.compute-atlas.com/facilities/northmark-valara-spartanburg-sc)) |
+| Heat rejection | Chillers with evaporative cooling towers, closed loop to the racks | About 459,000 gallons a day projected, 85 % lost to evaporation; reported as evaporative plus closed-loop cooling (same sources) |
+| IT load | 64 racks × ~130 kW = 8.3 MW full, 2.1 MW idle | Rack-scale liquid-cooled NVIDIA systems are rated about 120 kW, with 130–132 kW reported in deployments (industry guides). NMC² does not publish its hardware. Idle at 25 % is an assumption |
+| Ramp | Idle to full in about 10 s | Synchronous training jobs swing between compute-heavy and communication-heavy phases, causing fast power swings ([Microsoft/OpenAI/NVIDIA, arXiv:2508.14318](https://arxiv.org/abs/2508.14318)) |
+| Chillers | 2 duty + 1 standby, 4.5 MW each; 45 s to start, 120 s to full load | Vendor fast-start figures: online in about 43 s and near full load in under 4 minutes; standard restarts take 10–15 minutes |
+| Temperatures | Facility-water supply 25 °C; GPUs throttle at 32 °C, shut down at 35 °C | Warm-water liquid cooling range; exact limits are assumptions |
+| Facility power cap | 10.5 MW | Assumption, chosen so the verified fixes stay under it |
+
+Replace these with the facility's real values in `PlantParams` (`backend/interlock/plant.py`); the legacy code, runbook
+and tests use the same numbers.
 
 ## How it works
 
@@ -147,8 +181,8 @@ else works, using the deterministic rewrite.
   deployment an engineer reviews them. The mitigations are verified in simulation, but only inside this plant model.
 - **"Parity" means no differences across the tested scans.** It is strong evidence, not a proof.
 - **Interlock recommends; it never actuates.** A human approves every step.
-- **The live alert gives only a few seconds** in this scenario. That is a result, not a bug: the pre-warning is what
-  gives operators time to act.
+- **The ramp alert always comes too late** in this scenario, because a chiller takes about 45 s to start. That is a
+  result, not a bug: the pre-warning and the final call, both timed from the scheduler, are what give operators time.
 - **The "Ask Interlock" box** and the two jobs above are the only parts that call an LLM, and none has been run against the live API.
 
 ## Clickable prototype (no server needed)

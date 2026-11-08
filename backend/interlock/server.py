@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -21,6 +22,21 @@ WEB = Path(os.environ.get("INTERLOCK_WEB_DIR", BACKEND.parent / "frontend" / "di
 app = FastAPI(title="Interlock")
 il = Interlock()
 
+# The job clock is configurable: how long after the job is queued it starts. Each setting gets its
+# own (cached) engine, because the plant timeline and every prediction depend on it.
+JOB_START_CHOICES = (120, 180, 300, 600)
+_by_start: dict[int, Interlock] = {il.params.job_start_s: il}
+
+
+def engine_for(job_start_s: int | None) -> Interlock:
+    if job_start_s is None or job_start_s == il.params.job_start_s:
+        return il
+    if job_start_s not in JOB_START_CHOICES:
+        raise HTTPException(400, f"job_start_s must be one of {list(JOB_START_CHOICES)}")
+    if job_start_s not in _by_start:
+        _by_start[job_start_s] = Interlock(params=replace(il.params, job_start_s=job_start_s))
+    return _by_start[job_start_s]
+
 
 class ParityReq(BaseModel):
     sequences: int = 2000
@@ -31,13 +47,26 @@ class PlanReq(BaseModel):
     profile: str = "single"          # "single" or "staged"
     manual_lead_s: int | None = None  # start chiller 2 by hand this many seconds before the job
     manual_at: int | None = None      # or: start chiller 2 by hand at this absolute second (mid-run override)
+    job_start_s: int | None = None    # job clock: seconds from queueing to job start (default 300)
+
+
+class LogEntry(BaseModel):
+    t: int
+    text: str
+    kind: str = "info"
+
+
+class ReportReq(PlanReq):
+    format: str = "pdf"                       # "pdf" or "docx"
+    operator_log: list[LogEntry] = []         # the event log from the dashboard, including operator actions
 
 
 class AskReq(BaseModel):
     question: str
 
 
-def _check(req: PlanReq):
+def _check(req: PlanReq) -> Interlock:
+    il = engine_for(req.job_start_s)
     if req.profile not in ("single", "staged"):
         raise HTTPException(400, "profile must be 'single' or 'staged'")
     if req.manual_lead_s is not None and not (0 <= req.manual_lead_s <= il.params.job_start_s):
@@ -46,11 +75,12 @@ def _check(req: PlanReq):
         raise HTTPException(400, f"manual_at must be between 0 and {il.params.duration_s - 1}")
     if req.manual_at is not None and req.manual_lead_s is not None:
         raise HTTPException(400, "give manual_lead_s or manual_at, not both")
+    return il
 
 
 @app.get("/api/state")
-def state():
-    return il.public_state()
+def state(job_start_s: int | None = None):
+    return {**engine_for(job_start_s).public_state(), "job_start_choices": list(JOB_START_CHOICES)}
 
 
 @app.post("/api/parity")
@@ -62,14 +92,30 @@ def parity(req: ParityReq):
 
 @app.post("/api/prewarning")
 def prewarning(req: PlanReq):
-    _check(req)
-    return il.prewarning(req.profile, req.manual_lead_s)
+    return _check(req).prewarning(req.profile, req.manual_lead_s)
 
 
 @app.post("/api/simulate")
 def simulate(req: PlanReq):
-    _check(req)
-    return il.simulate(req.profile, req.manual_lead_s, req.manual_at)
+    return _check(req).simulate(req.profile, req.manual_lead_s, req.manual_at)
+
+
+@app.post("/api/report")
+def report(req: ReportReq):
+    """Root cause analysis (Pareto + 5 whys) of the run, as a PDF or Word document."""
+    from .report import build_rca, render_docx, render_pdf
+
+    if req.format not in ("pdf", "docx"):
+        raise HTTPException(400, "format must be 'pdf' or 'docx'")
+    eng = _check(req)
+    sim = eng.simulate(req.profile, req.manual_lead_s, req.manual_at)
+    model = build_rca(eng, sim, [e.model_dump() for e in req.operator_log])
+    if req.format == "pdf":
+        body, mime = render_pdf(model), "application/pdf"
+    else:
+        body, mime = render_docx(model), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    name = f"{model['doc_id']}-interlock-rca.{req.format}"
+    return Response(body, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @app.post("/api/ask")

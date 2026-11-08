@@ -87,6 +87,12 @@ a { color: var(--accent); }
   color: var(--ink-3);
 }
 .eyebrow .n { color: var(--accent); margin-right: 8px; font-family: var(--mono); letter-spacing: 0; }
+/* numbered section titles ("01 Live operations", "03 Shift handoff"): same face as the headlines */
+.eyebrow.section {
+  font: 500 17px/1.2 var(--display); letter-spacing: -0.015em; text-transform: none; color: var(--ink-2);
+  display: flex; align-items: baseline; gap: 2px;
+}
+.eyebrow.section .n { font: 500 13px var(--mono); letter-spacing: 0; margin-right: 10px; }
 
 /* ------------------------------------------------------------------ shell */
 .shell { min-height: 100%; display: flex; flex-direction: column; }
@@ -105,22 +111,26 @@ a { color: var(--accent); }
 .site { display: flex; align-items: center; gap: 10px; color: var(--ink-3); font-size: 13px; }
 .site b { color: var(--ink); font-weight: 500; }
 .site .sep { width: 1px; height: 16px; background: var(--line-2); }
-.status-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 28px; padding: 0 12px; border-radius: 999px;
-  border: 1px solid var(--line-2); font-size: 12px; color: var(--ink-2);
+.status-pill { /* same shape as the "Queue training job" button */
+  display: inline-flex; align-items: center; gap: 10px;
+  height: 44px; padding: 0 22px; border-radius: var(--r);
+  border: 1px solid var(--line-2); color: var(--ink-2);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap;
+  animation: pillIn 0.35s ease-out;
 }
+@keyframes pillIn { from { opacity: 0; transform: translateY(-3px); } }
 .status-pill.crit { border-color: var(--crit-line); color: var(--crit); background: var(--crit-soft); }
 .status-pill.warn { border-color: var(--warn-line); color: var(--warn); background: var(--warn-soft); }
 .status-pill.ok { border-color: var(--ok-line); color: var(--ok); }
-.status-pill.live { border-color: var(--accent-line); color: var(--accent); }
+.status-pill.live { border-color: var(--accent-line); color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 18px rgba(43, 156, 252, 0.18); }
+.status-pill.crit { box-shadow: 0 0 18px rgba(240, 82, 79, 0.2); }
 
 .led { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .led.pulse { animation: led 1.1s ease-in-out infinite; }
 @keyframes led { 50% { opacity: 0.25; } }
 
-.iconbtn {
-  position: relative; display: inline-grid; place-items: center;
+.iconbtn { white-space: nowrap;
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   height: 32px; min-width: 32px; padding: 0 10px; border-radius: var(--r);
   background: transparent; border: 1px solid var(--line); color: var(--ink-2); font-size: 12.5px;
 }
@@ -230,10 +240,27 @@ button.trace:hover span { color: var(--accent); }
   display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center;
   padding: 22px 24px; margin-bottom: 16px; position: relative; overflow: hidden;
 }
-.command::before { /* faint NMC² prism glow */
-  content: ""; position: absolute; right: -120px; top: -160px; width: 520px; height: 420px; pointer-events: none;
-  background: radial-gradient(closest-side, rgba(43, 156, 252, 0.16), rgba(143, 124, 240, 0.08) 55%, transparent);
+.command {
+  background:
+    linear-gradient(105deg, rgba(21, 18, 17, 0.0) 35%, rgba(43, 156, 252, 0.10) 70%, rgba(143, 124, 240, 0.16) 100%),
+    var(--surface);
+  border-color: rgba(43, 156, 252, 0.22);
 }
+.command::before, .command::after { /* NMC² prism glow */
+  content: ""; position: absolute; pointer-events: none; border-radius: 50%; filter: blur(8px);
+}
+.command::before {
+  right: -80px; top: -200px; width: 640px; height: 520px;
+  background: radial-gradient(closest-side, rgba(43, 156, 252, 0.42), rgba(62, 199, 192, 0.18) 50%, transparent 75%);
+  animation: drift 16s ease-in-out infinite alternate;
+}
+.command::after {
+  right: 180px; bottom: -260px; width: 560px; height: 440px;
+  background: radial-gradient(closest-side, rgba(143, 124, 240, 0.34), rgba(43, 156, 252, 0.10) 55%, transparent 75%);
+  animation: drift 20s ease-in-out infinite alternate-reverse;
+}
+.command > * { position: relative; z-index: 1; }
+@keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(-60px, 30px) scale(1.12); } }
 .command h2 { font-size: 22px; letter-spacing: -0.02em; }
 .command .sub { color: var(--ink-2); margin-top: 6px; max-width: 720px; }
 .command .ctrl { display: flex; align-items: center; gap: 10px; position: relative; }
@@ -345,7 +372,9 @@ button.trace:hover span { color: var(--accent); }
   display: flex; align-items: center; gap: 14px; padding: 10px 28px;
   background: var(--crit); color: #fff; font-weight: 500; font-size: 13.5px;
   position: sticky; top: 106px; z-index: 24;
+  animation: bannerIn 0.3s ease-out;
 }
+@keyframes bannerIn { from { transform: translateY(-100%); opacity: 0; } }
 .banner.warn { background: #b87916; }
 .banner.ok { background: #1c8f5b; }
 .banner .btn { height: 28px; border-color: rgba(255, 255, 255, 0.5); color: #fff; font-size: 12.5px; }
@@ -353,7 +382,7 @@ button.trace:hover span { color: var(--accent); }
 .banner .cd { font: 600 13px var(--mono); padding: 2px 8px; background: rgba(0, 0, 0, 0.22); border-radius: 3px; }
 
 /* ------------------------------------------------------------------ toasts + notification centre */
-.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column-reverse; gap: 10px; width: 380px; }
+.toasts { position: fixed; left: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column-reverse; gap: 10px; width: 380px; }
 .toast {
   background: #201c1b; border: 1px solid var(--line-2); border-left: 3px solid var(--ink-3);
   border-radius: var(--r-lg); padding: 12px 14px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
@@ -498,3 +527,77 @@ button.trace:hover span { color: var(--accent); }
 .fan-fast .blades { animation: spin 0.9s linear infinite; }
 .fan-stopped .blades { animation: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+
+/* ------------------------------------------------------------------ job clock settings */
+.clockcfg { grid-column: 1 / -1; display: flex; gap: 18px; flex-wrap: wrap; margin-top: -4px; }
+.clockcfg label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.clockcfg label span { letter-spacing: 0.12em; text-transform: uppercase; font-size: 10.5px; font-weight: 500; }
+.clockcfg select { height: 30px; font-size: 12.5px; background: rgba(15, 13, 12, 0.6); }
+
+/* ------------------------------------------------------------------ nav: Live operations is the main window */
+.nav .primary-tab { font-weight: 500; }
+
+/* ------------------------------------------------------------------ merged rules & verification */
+.summary { grid-template-columns: repeat(5, 1fr); }
+.section { margin-top: 32px; }
+.section-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.section-h h2 { font-size: 22px; letter-spacing: -0.02em; }
+.section-h h2 .n { font: 500 13px var(--mono); color: var(--accent); margin-right: 12px; }
+.askbox { margin-bottom: 16px; }
+.askbox .answer { margin-top: 10px; padding: 14px 16px; border: 1px solid var(--accent-line); background: var(--accent-soft); border-radius: var(--r-lg); white-space: pre-wrap; font-size: 13.5px; }
+.linkish { background: none; border: 0; color: var(--ink); font-weight: 600; padding: 0; text-align: left; }
+.linkish:hover { color: var(--accent); }
+
+/* ------------------------------------------------------------------ rule drawer + picker */
+.drawer-scrim { position: fixed; inset: 0; z-index: 88; background: rgba(8, 6, 6, 0.5); animation: fadeIn 0.2s ease-out; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 90; width: min(640px, 100vw);
+  background: #1a1716; border-left: 1px solid var(--line-2); box-shadow: -30px 0 80px rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column; animation: drawerIn 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.drawer::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 1px; background: var(--prism); opacity: 0.7; }
+@keyframes drawerIn { from { transform: translateX(40px); opacity: 0; } }
+.drawer-h { display: flex; align-items: flex-start; gap: 10px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line); }
+.drawer-h .x { background: none; border: 0; color: var(--ink-3); font-size: 24px; line-height: 1; padding: 2px 4px; }
+.drawer-h .x:hover { color: var(--ink); }
+.drawer-b { flex: 1; overflow: auto; padding: 20px 22px 32px; }
+.rulepicker { display: flex; gap: 4px; margin-top: 10px; flex-wrap: wrap; }
+.rulepicker button {
+  height: 28px; min-width: 40px; padding: 0 10px; border-radius: var(--r); border: 1px solid var(--line-2);
+  background: none; color: var(--ink-2); font: 600 12px var(--mono); transition: all 0.15s;
+}
+.rulepicker button.prot { box-shadow: inset 0 -2px 0 var(--crit-line); }
+.rulepicker button:hover { color: var(--ink); border-color: var(--ink-4); }
+.rulepicker button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 0 16px rgba(43, 156, 252, 0.3); }
+.rulesheet .english { font-size: 19px; }
+
+/* ------------------------------------------------------------------ RCA report card */
+.report { display: flex; align-items: center; gap: 20px; margin-bottom: 16px; flex-wrap: wrap;
+  background: linear-gradient(100deg, rgba(43, 156, 252, 0.08), transparent 60%), var(--surface); border-color: var(--accent-line); }
+.report-ic { width: 52px; height: 52px; border-radius: var(--r-lg); display: grid; place-items: center; color: var(--accent);
+  background: var(--accent-soft); border: 1px solid var(--accent-line); flex: none; }
+.report h3 { font-size: 18px; }
+
+/* ------------------------------------------------------------------ motion (tasteful, reduced-motion aware) */
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes riseIn { from { opacity: 0; transform: translateY(8px); } }
+.view { animation: riseIn 0.38s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.anim-in { animation: riseIn 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > * { animation: riseIn 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; } .stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; } .stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; } .stagger > *:nth-child(7) { animation-delay: 240ms; }
+.feed-in { animation: riseIn 0.3s ease-out; }
+.modal { animation: modalIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.backdrop { animation: fadeIn 0.2s ease-out; }
+@keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
+.mstep { animation: riseIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tile .v, .tile .bar i { transition: color 0.4s ease, width 0.3s ease; }
+.tile::after { transition: opacity 0.3s; }
+.stepper div::before { transition: background 0.4s ease, box-shadow 0.4s ease; }
+.rcard, .btn, .chip, .trace { transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s; }
+.rcard:hover { transform: translateX(2px); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.countdown .big { transition: color 0.3s; }
+@media (max-width: 1180px) { .summary { grid-template-columns: repeat(3, 1fr); } }

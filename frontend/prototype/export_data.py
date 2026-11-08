@@ -24,7 +24,7 @@ data = {
 }
 # reference outputs from Python for checking the JS port
 ref = {}
-for name, prof, at in [("single", "single", None), ("prestart", "single", 30), ("staged", "staged", None)]:
+for name, prof, at in [("single", "single", None), ("prestart", "single", 180), ("staged", "staged", None)]:
     run, _ = il._run(prof, manual_at=at)
     ref[name] = {"temp": run.temp, "fac_kw": run.fac_kw, "it_kw": run.it_kw, "fired": run.fired, "summary": il.summarize(run)}
 ref["latest_safe"] = il.latest_safe_manual_start("single")

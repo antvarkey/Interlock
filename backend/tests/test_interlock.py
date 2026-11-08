@@ -18,7 +18,7 @@ def test_parse_counts_and_comments(il):
     assert len(il.prog.decls) == 16
     assert names["TS1"].comment == "CHW SUPPLY TEMP C"
     assert names["PMP_CM"].init is True
-    assert names["TS1_P"].init == 7.0
+    assert names["TS1_P"].init == 25.0
 
 
 def test_parse_error_has_line_number():
@@ -29,13 +29,13 @@ def test_parse_error_has_line_number():
 def test_interpreter_trips_after_20_scans_of_fast_rise():
     prog = parse(open("legacy/chw_sequencer.st").read())
     c = LegacyController(prog)
-    temp, tripped_at = 7.0, None
+    temp, tripped_at = 25.0, None
     for i in range(40):
-        temp += 0.2
-        outs, _ = c.step({"TS1": temp, "PF1": 500.0, "CH1_LD": 50.0, "CH2_ST": False, "MAN_C2": False, "AI_77": 0.0})
+        temp += 0.05
+        outs, _ = c.step({"TS1": temp, "PF1": 3000.0, "CH1_LD": 50.0, "CH2_ST": False, "MAN_C2": False, "AI_77": 0.0})
         if not outs["PMP_CM"] and tripped_at is None:
             tripped_at = i + 1
-    assert tripped_at == 20  # the 20th consecutive scan with a rise above 0.1 degC trips the loop
+    assert tripped_at == 20  # the 20th consecutive scan with a rise above 0.02 degC trips the loop
 
 
 # ---------------------------------------------------------------- extraction
@@ -53,7 +53,7 @@ def test_findings(il):
     assert kinds == ["dead_input", "runbook_mismatch", "runbook_mismatch", "runbook_ok", "runbook_ok"]
     texts = " ".join(f["text"] for f in il.ex["findings"])
     assert "300 s but the runbook says 2 minutes" in texts
-    assert "0.1 °C/s but the runbook says 0.15" in texts
+    assert "0.02 °C/s but the runbook says 0.03" in texts
     assert "AI_77" in texts and "can never fire" in texts
 
 
@@ -88,23 +88,23 @@ def test_parity_catches_injected_bugs(il, bug):
     assert not r["passed"] and r["first_mismatches"]
 
 
-@pytest.mark.parametrize("profile,lead", [("single", None), ("staged", None), ("single", 60)])
+@pytest.mark.parametrize("profile,lead", [("single", None), ("staged", None), ("single", 120)])
 def test_old_and_new_agree_inside_the_plant(il, profile, lead):
     at = None if lead is None else il.params.job_start_s - lead
     assert il.sim_parity(profile, at)
 
 
 # ---------------------------------------------------------------- plant, predictor, alerts
-def test_unmitigated_start_trips_about_28s_in(il):
+def test_unmitigated_start_trips_about_29s_in(il):
     p = il.predict("single")
     assert p["will_trip"] and p["primary"]["rule"] == "R1"
-    assert p["trip_after_start_s"] == 28 and p["outcome"] == "thermal_shutdown"
+    assert p["trip_after_start_s"] == 29 and p["outcome"] == "thermal_shutdown"
 
 
-@pytest.mark.parametrize("profile,lead", [("staged", None), ("single", 60), ("staged", 60)])
+@pytest.mark.parametrize("profile,lead", [("staged", None), ("single", 120), ("staged", 120)])
 def test_mitigations_avoid_the_trip(il, profile, lead):
     p = il.predict(profile, lead)
-    assert not p["will_trip"] and p["peak_temp_c"] == 7.0
+    assert not p["will_trip"] and p["peak_temp_c"] < 26.0
     assert p["power_cap_margin_kw"] > 0  # the fix must not push the plant into the load-shed rule
 
 
@@ -118,7 +118,7 @@ def test_too_late_to_pre_start_does_not_help(il):
 
 def test_prewarning_contents(il):
     pw = il.prewarning("single")
-    assert pw["level"] == "critical" and "28 s" in pw["title"]
+    assert pw["level"] == "critical" and "29 s" in pw["title"]
     assert pw["rule"]["id"] == "R1" and pw["rule"]["lines"] == [52, 56]
     assert {s["id"] for s in pw["steps"]} == {"prestart_ch2", "staged_start"}
     assert all(s["avoids_trip"] for s in pw["steps"])
@@ -126,10 +126,15 @@ def test_prewarning_contents(il):
     assert il.prewarning("staged")["level"] == "ok"
 
 
-def test_live_alert_window_is_short_and_honest(il):
+def test_final_call_and_ramp_alert_are_honest(il):
+    """A chiller needs about 45 s to start, so once the ramp is visible it is too late. The final call,
+    timed from the scheduler's start time, is what still gives operators a window."""
     sim = il.simulate("single")
-    la = sim["live_alert"]
-    assert la["level"] == "critical" and la["act_within_s"] is not None and la["act_within_s"] < 10
+    fc, la = sim["final_call"], sim["live_alert"]
+    assert fc["level"] == "critical" and fc["t"] < il.params.job_start_s and fc["act_within_s"] == 60
+    assert fc["deadline"] == il.latest_safe_manual_start("single")
+    assert la["level"] == "critical" and la["act_within_s"] is None and la["steps"][0]["id"] == "prepare_recovery"
+    assert il.simulate("single", 120)["final_call"] is None  # the plan already pre-starts chiller 2
 
 
 def test_simulation_events_and_handoff(il):
@@ -137,7 +142,7 @@ def test_simulation_events_and_handoff(il):
     types = [e["type"] for e in bad["events"]]
     assert types[0] == "prewarning" and "rule_fired" in types and "recovery" in types
     assert bad["handoff"]["root_label"] == "Root cause" and len(bad["handoff"]["related_tickets"]) == 4
-    good = il.simulate("staged", 60)
+    good = il.simulate("staged", 120)
     assert good["handoff"]["root_label"] == "Risk the plan avoided"
     assert not any(e["type"] == "rule_fired" for e in good["events"])
     assert len(bad["series"]["t"]) == il.params.duration_s
@@ -169,9 +174,9 @@ def test_api_mid_run_override():
 
     c = TestClient(app)
     base = c.post("/api/simulate", json={"profile": "single"}).json()
-    la = base["live_alert"]
-    assert la["level"] == "critical" and la["act_within_s"] is not None
-    in_time = la["t"] + la["act_within_s"]
+    fc = base["final_call"]
+    assert fc["level"] == "critical" and fc["act_within_s"] is not None
+    in_time = fc["t"] + fc["act_within_s"]
     assert base["latest_safe_manual_start"] == in_time
     ok = c.post("/api/simulate", json={"profile": "single", "manual_at": in_time}).json()
     assert ok["series"]["temp"][:in_time] == base["series"]["temp"][:in_time]
@@ -180,6 +185,18 @@ def test_api_mid_run_override():
     assert late["prediction"]["will_trip"]
     assert c.post("/api/simulate", json={"profile": "single", "manual_at": 5000}).status_code == 400
     assert c.post("/api/simulate", json={"manual_at": 10, "manual_lead_s": 10}).status_code == 400
+
+
+def test_api_job_clock_is_configurable():
+    from fastapi.testclient import TestClient
+    from interlock.server import app
+
+    c = TestClient(app)
+    short = c.post("/api/simulate", json={"profile": "single", "job_start_s": 120}).json()
+    assert short["job_start"] == 120 and short["duration"] == 120 + 420
+    assert short["prediction"]["trip_after_start_s"] == 29  # same physics, earlier start
+    assert c.get("/api/state", params={"job_start_s": 600}).json()["plant"]["job_start_s"] == 600
+    assert c.post("/api/simulate", json={"job_start_s": 7}).status_code == 400
 
 
 # ---------------------------------------------------------------- LLM-assisted jobs (scripted stand-in, no network)
@@ -261,3 +278,26 @@ def test_llm_api_reports_unavailable_without_key(monkeypatch):
     st = c.get("/api/llm/status").json()
     assert st["available"] is False and st["rewrite_in_use"] == "rules"
     assert c.post("/api/llm/translate").json()["available"] is False
+
+
+# ---------------------------------------------------------------- RCA report
+@pytest.mark.parametrize("fmt,magic", [("pdf", b"%PDF"), ("docx", b"PK")])
+def test_rca_report_downloads(fmt, magic):
+    from fastapi.testclient import TestClient
+    from interlock.server import app
+
+    r = TestClient(app).post("/api/report", json={"profile": "single", "format": fmt,
+                                                  "operator_log": [{"t": 0, "text": "Operator chose to start without changes"}]})
+    assert r.status_code == 200 and r.content[:4].startswith(magic) and len(r.content) > 20000
+    assert f".{fmt}" in r.headers["content-disposition"]
+
+
+def test_rca_model_pareto_and_five_whys(il):
+    from interlock.report import build_rca
+
+    bad = build_rca(il, il.simulate("single"))
+    assert bad["tripped"] and len(bad["whys"]) == 5 and "R1" in bad["whys"][1]["a"]
+    assert bad["pareto"][0]["cause"].startswith("Rate-of-rise") and bad["pareto"][0]["count"] == 5
+    assert bad["pareto"][-1]["cum_pct"] == pytest.approx(100)
+    near = build_rca(il, il.simulate("staged"))
+    assert not near["tripped"] and near["severity"].startswith("Near miss") and near["pareto"][0]["count"] == 4

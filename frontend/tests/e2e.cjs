@@ -9,7 +9,8 @@ const check = (name, ok, info = "") => { console.log(`${ok ? "PASS" : "FAIL"}  $
 
 (async () => {
   const b = await chromium.launch();
-  const pg = await b.newPage({ viewport: { width: 1440, height: 960 } });
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 960 }, acceptDownloads: true });
+  const pg = await ctx.newPage();
   const errs = [];
   pg.on("pageerror", (e) => errs.push(String(e)));
   pg.on("console", (m) => m.type() === "error" && errs.push(m.text()));
@@ -18,7 +19,19 @@ const check = (name, ok, info = "") => { console.log(`${ok ? "PASS" : "FAIL"}  $
   await pg.goto(URL);
   await pg.waitForSelector("#go");
   check("wordmark", (await pg.getAttribute(".logo", "aria-label")) === "Interlock" && (await pg.$(".logo .fan")) !== null);
+  const shape = (sel) => pg.$eval(sel, (e) => getComputedStyle(e).borderRadius + "/" + getComputedStyle(e).height);
+  const pill = await shape("[data-testid=status]"), btn = await shape("#go");
+  check("status box same shape as queue button", pill === btn, `${pill} vs ${btn}`);
+  check("job clock defaults to T-5 min", (await pg.innerText("[data-testid=clock]")) === "T−300s");
   await shot("01-idle");
+
+  // the rule drawer opens from the top bar on any tab
+  await pg.click("#rules-btn");
+  await pg.waitForSelector(".drawer .english");
+  check("rule drawer", /0\.02 °C\/s/.test(await pg.innerText(".drawer .english")));
+  await pg.waitForTimeout(400);
+  await shot("01b-drawer");
+  await pg.keyboard.press("Escape");
 
   // Run 1: ignore the pre-warning, act inside the live-alert window
   await pg.click("#go");
@@ -27,7 +40,7 @@ const check = (name, ok, info = "") => { console.log(`${ok ? "PASS" : "FAIL"}  $
   await shot("02-prewarning");
   await pg.click("[data-pick=ignore]");
   await pg.waitForSelector("[data-testid=act-within]", { timeout: 30000 });
-  check("live alert countdown", /\d/.test(await pg.innerText("[data-testid=act-within]")));
+  check("final-call countdown", /\d/.test(await pg.innerText("[data-testid=act-within]")) && /final call/i.test(await pg.innerText(".alertpanel")));
   check("critical banner", (await pg.$(".banner")) !== null);
   check("alert toast", (await pg.$(".toast.crit")) !== null);
   await shot("03-live-alert");
@@ -56,14 +69,25 @@ const check = (name, ok, info = "") => { console.log(`${ok ? "PASS" : "FAIL"}  $
   const hand = await pg.innerText("#hand");
   check("handoff has root cause + operator log", /R1/.test(hand) && /Operator chose to start without changes/.test(hand));
   await shot("07-handoff");
+  for (const [fmt, sel] of [["pdf", "#rca-pdf"], ["docx", "#rca-docx"]]) {
+    const [dl] = await Promise.all([pg.waitForEvent("download", { timeout: 30000 }), pg.click(sel)]);
+    check(`RCA ${fmt} download`, dl.suggestedFilename().endsWith("." + fmt), dl.suggestedFilename());
+  }
 
-  await pg.click("#t-rules");
+  await pg.click("#t-logic");
   await pg.click("[data-r=R7]");
-  check("rules detail", /retired/i.test(await pg.innerText("body")));
+  check("rules detail", /retired/i.test(await pg.innerText("#detail")));
+  check("only one Ask box", (await pg.$$("[aria-label='Ask about the rules']")).length === 1);
+  check("removed parser sentence", !/not guessed/.test(await pg.innerText("body")));
   await pg.click("[data-r=R1]");
   await shot("08-rules");
 
-  await pg.click("#t-verify");
+  // a rule can be popped out into its own window
+  const [pop] = await Promise.all([ctx.waitForEvent("page"), pg.click("#detail >> text=Open in new window")]);
+  await pop.waitForSelector(".english");
+  check("rule in its own window", /R1/.test(await pop.title()) && /cooling loop/.test(await pop.innerText(".english")));
+  await pop.close();
+
   await pg.waitForFunction(() => /No differences/.test(document.body.innerText), null, { timeout: 30000 });
   check("parity passes", true);
   await pg.click("[data-bug=lockout]");

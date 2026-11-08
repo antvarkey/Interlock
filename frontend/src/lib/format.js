@@ -9,3 +9,8 @@ export const rel = (t, jobStart) => (t < jobStart ? `T−${jobStart - t}s` : `T+
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 export const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/** Power for people: 8300 kW -> "8.3 MW". */
+export const mw = (kw, d = 1) => fmt(kw / 1000, d);
+
+export const mins = (s) => (s % 60 === 0 ? `${s / 60} min` : `${fmt(s / 60, 1)} min`);
