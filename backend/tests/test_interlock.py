@@ -161,6 +161,27 @@ def test_api():
     assert c.get("/").status_code == 200
 
 
+def test_api_mid_run_override():
+    """The dashboard's "start chiller 2 now" button re-simulates with manual_at.
+    The history before the click must not change, and acting inside the live-alert window must avoid the trip."""
+    from fastapi.testclient import TestClient
+    from interlock.server import app
+
+    c = TestClient(app)
+    base = c.post("/api/simulate", json={"profile": "single"}).json()
+    la = base["live_alert"]
+    assert la["level"] == "critical" and la["act_within_s"] is not None
+    in_time = la["t"] + la["act_within_s"]
+    assert base["latest_safe_manual_start"] == in_time
+    ok = c.post("/api/simulate", json={"profile": "single", "manual_at": in_time}).json()
+    assert ok["series"]["temp"][:in_time] == base["series"]["temp"][:in_time]
+    assert not ok["prediction"]["will_trip"]
+    late = c.post("/api/simulate", json={"profile": "single", "manual_at": in_time + 10}).json()
+    assert late["prediction"]["will_trip"]
+    assert c.post("/api/simulate", json={"profile": "single", "manual_at": 5000}).status_code == 400
+    assert c.post("/api/simulate", json={"manual_at": 10, "manual_lead_s": 10}).status_code == 400
+
+
 # ---------------------------------------------------------------- LLM-assisted jobs (scripted stand-in, no network)
 import json as _json
 

@@ -1,6 +1,7 @@
 """Export the Python engine's results as JSON for the browser prototype."""
 import json, sys
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+# the Python engine lives in backend/ (this file is frontend/prototype/export_data.py)
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "backend"))
 from interlock.engine import Interlock
 from interlock.st_parser import Assign, If
 

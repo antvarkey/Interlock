@@ -1,5 +1,6 @@
 from playwright.sync_api import sync_playwright
-import sys
+import os, sys
+OUT = sys.argv[1] if len(sys.argv) > 1 else "."
 with sync_playwright() as p:
     b=p.chromium.launch(args=["--no-sandbox"])
     pg=b.new_page(viewport={"width":1360,"height":900})
@@ -10,18 +11,18 @@ with sync_playwright() as p:
     print("verify auto:", pg.inner_text("#vout")[:80].replace("\n"," "))
     pg.click("#go"); pg.wait_for_selector("#modal button[data-pick]")
     print("modal title:", pg.inner_text("#mTitle"))
-    pg.screenshot(path="/tmp/proto_modal.png")
+    pg.screenshot(path=OUT + "/proto_modal.png")
     # ignore → alert
     pg.click("[data-pick=ignore]")
     pg.wait_for_selector(".toast.crit", timeout=30000)
     pg.wait_for_function("document.querySelector('.cd') && document.querySelector('.cd').textContent.includes('Act within')", timeout=30000)
     print("alert:", pg.inner_text(".toast.crit .tt"), "|", pg.inner_text(".cd"))
-    pg.screenshot(path="/tmp/proto_alert.png")
+    pg.screenshot(path=OUT + "/proto_alert.png")
     pg.click("#opCh2"); pg.wait_for_timeout(600)
     print("toasts:", [t.inner_text().split("\n")[0] for t in pg.query_selector_all(".toast")])
     pg.click("#skip"); pg.wait_for_selector("#result.on", timeout=30000)
     print("result:", pg.inner_text("#result")[:120].replace("\n"," "))
-    pg.screenshot(path="/tmp/proto_done.png")
+    pg.screenshot(path=OUT + "/proto_done.png")
     # second run: do nothing → trip
     pg.click("#go"); pg.wait_for_selector("#modal button[data-pick]")
     pg.click("[data-pick=ignore]")
@@ -29,11 +30,11 @@ with sync_playwright() as p:
     pg.click("#skip"); pg.wait_for_selector("#result.on", timeout=40000)
     print("no-action result:", pg.inner_text("#result")[:140].replace("\n"," "))
     print("toast titles:", [t.inner_text().split("\n")[0] for t in pg.query_selector_all(".toast")])
-    pg.screenshot(path="/tmp/proto_trip.png")
+    pg.screenshot(path=OUT + "/proto_trip.png")
     pg.click("#t-hand"); print("handoff:", pg.inner_text("#hand")[:200].replace("\n"," / "))
     pg.click("#t-rules"); pg.click("[data-r=R6]"); print("rules ok", pg.inner_text("#detail")[:60].replace("\n"," "))
     pg.click("#t-verify"); pg.click("[data-bug=off_by_one]"); pg.wait_for_timeout(1500)
     print("bug:", pg.inner_text("#vout")[:200].replace("\n"," "))
-    pg.screenshot(path="/tmp/proto_verify.png")
+    pg.screenshot(path=OUT + "/proto_verify.png")
     print("ERRORS:",errs)
     b.close()

@@ -20,14 +20,36 @@ after the job starts. Restart is then blocked for 300 seconds, and the GPUs shut
 Interlock finds R1 in the old code, predicts the trip from the job queue, and tells the operator what to do. It checks
 each recommended step in the plant simulator before suggesting it.
 
+## Repository layout
+
+```
+backend/    Python: parser, rule extraction, rewrite + parity test, plant simulator, predictor, alerts, FastAPI
+  interlock/    the package (server.py is the API)
+  legacy/       the fake legacy system: controller, glossary, runbook, point list, tickets, mitigations
+  generated/    the generated modern controller
+  tests/        pytest suite
+frontend/   React + Vite operator dashboard
+  src/          App, views (Live, Rules, Verification, Handoff), components, the scenario engine
+  tests/        browser end-to-end check (Playwright)
+  prototype/    single-file offline fallback (no server), same look and logo
+```
+
 ## Run it
 
 ```bash
+# 1. backend (API on :8000)
+cd backend
 pip install -r requirements.txt
-uvicorn interlock.server:app --port 8000     # open http://localhost:8000
+uvicorn interlock.server:app --port 8000
+
+# 2. frontend, in a second terminal
+cd frontend
+npm install
+npm run build        # the backend now serves the dashboard at http://localhost:8000
+# or: npm run dev    # live reload on http://localhost:5173, /api is proxied to :8000
 ```
 
-Other commands:
+Other backend commands (run from `backend/`):
 
 ```bash
 python -m interlock.cli rules               # extracted rules and findings
@@ -35,17 +57,40 @@ python -m interlock.cli demo                # the three job-start scenarios, as 
 python -m interlock.cli parity              # old-vs-new differential test (about 425,000 scans)
 python -m interlock.cli parity --bug lockout   # shows the test catching an injected change
 python -m interlock.cli build               # writes generated/modern_sequencer.py
-python -m pytest                            # 23 tests
+python -m pytest                            # 31 tests
 ```
 
-## What is in the dashboard
+Dashboard end-to-end check (backend running and serving `frontend/dist`):
 
-| Tab | What it shows |
+```bash
+cd frontend && node tests/e2e.cjs [screenshot-dir]
+```
+
+## The dashboard
+
+Design follows the two sponsors: 8090's warm graphite palette, Söhne-style grotesk type (Inter Tight), dot grid,
+hairlines, numbered sections and traceability tags (`R1 · L52–56` on every alert); NMC²'s electric blue, prism
+glow, thin telemetry numerals and letter-spaced call-to-action buttons. The wordmark is white with the "O" drawn as a
+cooling fan that turns while the loop runs, turns faster when chiller 2 is helping, and stops when the loop trips.
+
+| Section | What it shows |
 | --- | --- |
-| Live scenario | Queue a job, see the pre-warning with verified steps, run the scenario with live charts and alerts |
-| Rules | The 7 extracted rules, each linked to its source lines, with findings and matching incident tickets |
-| Verify | Parity test of the old code against the rewrite, rule coverage, and a "break it on purpose" button |
-| Shift handoff | A generated handoff: timeline, root cause, earlier tickets with the same pattern, follow-ups |
+| 01 Live operations | Queue a job, pre-warning dialog with verified steps, live telemetry, charts against the "if nobody acts" forecast, and the live alert |
+| 02 Rules | The 7 extracted rules with source lines, legacy/rewrite code side by side, findings, incident tickets, Ask box |
+| 03 Verification | Parity test of the old code against the rewrite, rule coverage, "break it on purpose" buttons, where the AI is used |
+| 04 Shift handoff | Generated handoff: timeline including operator actions, root cause, earlier tickets, follow-ups. Pre-job briefing before a run |
+
+**Live alerts.** The alert system has these parts:
+
+- **Pre-warning** when the job is queued: which rule fires, the evidence, matching incidents, and steps that are each
+  checked in the simulator. The operator picks a plan, ignores it, or cancels.
+- **Live alert** when the power ramp is detected: an act-within countdown, the time to trip, and buttons to start
+  chiller 2 or acknowledge. Playback slows down inside the window so the operator can act.
+- **Operator override mid-run.** "Start chiller 2 now" re-simulates on the backend (`/api/simulate` with `manual_at`)
+  and playback continues on the new timeline. Acting inside the window avoids the trip; acting late shortens the outage.
+- **Alert states:** armed, monitoring, act now, window closed, tripped (with the lockout countdown), recovering, resolved.
+- **Delivery:** toasts, a notification bell with history, alert tones, a red banner that shows on every tab, the
+  browser tab title, the phase stepper and the logo fan.
 
 ## How it works
 
@@ -60,17 +105,18 @@ plant.py (heat, chillers, loop) + modern controller ──► engine.predict ─
 
 | File | Role |
 | --- | --- |
-| `legacy/` | The fake legacy system: controller, glossary, runbook, point list, tickets, mitigations |
-| `interlock/st_parser.py` | Parser for the Structured Text subset, keeps source line numbers |
-| `interlock/interp.py` | Reference interpreter, the ground truth for the rewrite |
-| `interlock/extract.py` | Plain-English rules, counter detection, runbook and point-list checks, ticket linking |
-| `interlock/codegen.py` | Generates readable Python with descriptive names and rule annotations |
-| `interlock/parity.py` | Differential test: compares outputs, all internal variables and rules fired on every scan |
-| `interlock/plant.py` | Small cooling-plant model used to run the controller forward |
-| `interlock/engine.py` | Predictor, verified mitigations, pre-warning, live alert, handoff |
-| `interlock/llm_assist.py` | The LLM jobs: rewrite proposal (verified), glossary draft (human approval) |
-| `interlock/ask.py` | Optional question box (needs `ANTHROPIC_API_KEY`) |
-| `interlock/server.py`, `web/` | FastAPI API and the dashboard (plain JavaScript, no build step) |
+| `backend/legacy/` | The fake legacy system: controller, glossary, runbook, point list, tickets, mitigations |
+| `backend/interlock/st_parser.py` | Parser for the Structured Text subset, keeps source line numbers |
+| `backend/interlock/interp.py` | Reference interpreter, the ground truth for the rewrite |
+| `backend/interlock/extract.py` | Plain-English rules, counter detection, runbook and point-list checks, ticket linking |
+| `backend/interlock/codegen.py` | Generates readable Python with descriptive names and rule annotations |
+| `backend/interlock/parity.py` | Differential test: compares outputs, all internal variables and rules fired on every scan |
+| `backend/interlock/plant.py` | Small cooling-plant model used to run the controller forward |
+| `backend/interlock/engine.py` | Predictor, verified mitigations, pre-warning, live alert, handoff |
+| `backend/interlock/llm_assist.py` | The LLM jobs: rewrite proposal (verified), glossary draft (human approval) |
+| `backend/interlock/ask.py` | Optional question box (needs `ANTHROPIC_API_KEY`) |
+| `backend/interlock/server.py` | FastAPI API; serves the built dashboard from `frontend/dist` |
+| `frontend/src/lib/useScenario.js` | Plays the simulation, raises the live alert, handles operator actions |
 
 ## Where the AI is used
 
@@ -107,13 +153,13 @@ else works, using the deterministic rewrite.
 
 ## Clickable prototype (no server needed)
 
-`prototype/interlock.html` is a single file that runs the whole scenario in the browser: pre-warning dialog, live alert
+`frontend/prototype/interlock.html` is a single file that runs the whole scenario in the browser: pre-warning dialog, live alert
 with countdown, popup notifications, rules, parity test and handoff. Open it directly, or host it anywhere static.
 
 ```
-cd prototype
+cd frontend/prototype
 python export_data.py      # re-export rules and reference timelines from the Python engine
 python build.py            # assemble interlock.html from template.html + engine.js + app.js + style.css
 node test_engine.js        # check the JavaScript engine matches the Python results exactly
-python e2e_test.py         # click through it in headless Chromium (pip install playwright; playwright install chromium)
+python e2e_test.py [dir]   # click through it in headless Chromium (pip install playwright)
 ```

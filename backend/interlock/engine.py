@@ -269,9 +269,12 @@ class Interlock:
         }
 
     # ------------------------------------------------------------ simulation + handoff
-    def simulate(self, profile: str = "single", manual_lead_s: int | None = None) -> dict:
+    def simulate(self, profile: str = "single", manual_lead_s: int | None = None,
+                 manual_at: int | None = None) -> dict:
+        """Run the scenario. `manual_at` (absolute second) lets the dashboard model an operator
+        turning on the chiller 2 override mid-run, e.g. in response to the live alert."""
         p = self.params
-        run, manual_at = self._run(profile, manual_lead_s)
+        run, manual_at = self._run(profile, manual_lead_s, manual_at)
         pred = self.summarize(run)
         baseline = self.prewarning("single", None)
         events: list[dict] = []
@@ -282,6 +285,7 @@ class Interlock:
         if manual_at is not None:
             events.append({"t": manual_at, "type": "action", "level": "info",
                            "title": "Operator turns on the manual chiller 2 start override"})
+        latest_safe = self.latest_safe_manual_start(profile) if pred["will_trip"] or manual_at is not None else None
         live = self.live_alert(run, pred, profile)
         if live:
             events.append({"t": live["t"], "type": "live_alert", "level": live["level"], "title": live["title"]})
@@ -307,7 +311,7 @@ class Interlock:
                 "t": run.t, "temp": run.temp, "it_kw": run.it_kw, "fac_kw": run.fac_kw, "cool_kw": run.cool_kw,
                 "cap_kw": run.cap_kw, "pumps": run.pumps, "ch2_running": run.ch2_running,
             },
-            "job_start": p.job_start_s, "duration": p.duration_s,
+            "job_start": p.job_start_s, "duration": p.duration_s, "latest_safe_manual_start": latest_safe,
             "thresholds": {"throttle_c": p.throttle_c, "shutdown_c": p.shutdown_c, "power_cap_kw": self.facts["power_cap_kw"]},
             "handoff": self.handoff(pred, events, profile, manual_at, baseline),
         }

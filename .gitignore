@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+backend/generated/llm_sequencer.py
+backend/generated/llm_translation_report.json
+backend/generated/glossary_proposed.json
+.env
+
+# frontend
+node_modules/
+frontend/dist/
+.DS_Store

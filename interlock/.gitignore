@@ -1,8 +1,0 @@
-__pycache__/
-.pytest_cache/
-.venv/
-*.pyc
-generated/llm_sequencer.py
-generated/llm_translation_report.json
-generated/glossary_proposed.json
-.env
