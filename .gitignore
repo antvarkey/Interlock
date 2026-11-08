@@ -10,4 +10,5 @@ backend/generated/glossary_proposed.json
 # frontend
 node_modules/
 frontend/dist/
+frontend/.vite/
 .DS_Store
