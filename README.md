@@ -42,7 +42,7 @@ frontend/   React + Vite operator dashboard
 # 1. backend (API on :8000)
 cd backend
 pip install -r requirements.txt
-uvicorn interlock.server:app --port 8000
+python -m uvicorn interlock.server:app --port 8000
 
 # 2. frontend, in a second terminal
 cd frontend

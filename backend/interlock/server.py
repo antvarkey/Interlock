@@ -1,4 +1,4 @@
-"""FastAPI server for Interlock. Run with:  uvicorn interlock.server:app --port 8000"""
+"""FastAPI server for Interlock. Run with:  python -m uvicorn interlock.server:app --port 8000"""
 from __future__ import annotations
 
 import os
