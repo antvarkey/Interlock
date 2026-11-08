@@ -1,0 +1,7 @@
+tag,description,status,last_changed
+TS1,CHW supply temperature,ACTIVE,2019-04-11
+PF1,Facility power meter,ACTIVE,2022-08-30
+CH1_LD,Chiller 1 load,ACTIVE,2019-04-11
+CH2_ST,Chiller 2 run status,ACTIVE,2019-04-11
+MAN_C2,Chiller 2 manual start override,ACTIVE,2004-11-18
+AI_77,Auxiliary condenser flow transmitter,RETIRED,2016-02-09

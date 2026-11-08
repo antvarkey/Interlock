@@ -1,0 +1,9 @@
+[
+  {"id": "INC-2291", "date": "2025-03-14", "text": "Cooling loop tripped about 30 seconds after a training job started on cluster B. Cause unknown. Loop restarted after the lockout."},
+  {"id": "INC-2347", "date": "2025-05-02", "text": "GPU thermal shutdown during job launch. Chilled water temperature climbed fast. No root cause found."},
+  {"id": "INC-2402", "date": "2025-07-19", "text": "CHW pumps stopped at job start. Restart was blocked for several minutes. Closed as unknown."},
+  {"id": "INC-2418", "date": "2025-08-03", "text": "Alarm AI_77 never triggers in test. Ticket closed, no action taken."},
+  {"id": "INC-2455", "date": "2025-09-12", "text": "Fan noise complaint in hall 3. Fan bearing replaced."},
+  {"id": "INC-2460", "date": "2025-09-20", "text": "UPS battery module replaced during scheduled maintenance."},
+  {"id": "INC-2503", "date": "2025-10-27", "text": "Cooling tripped again when a 40-node job started. Same pattern as earlier tickets, possibly. Not investigated."}
+]

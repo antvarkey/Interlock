@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interlock: cooling control warnings for data centers</title>
+<link rel="icon" href="data:,">
+<style>
+/*CSS*/
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="9" width="14" height="14" rx="4" fill="none" stroke="var(--accent)" stroke-width="3.5"/><rect x="15" y="9" width="14" height="14" rx="4" fill="none" stroke="var(--ink)" stroke-width="3.5"/></svg>
+    Interlock
+  </div>
+  <span class="site">Cluster B · <b>Hall 2 chilled water</b> · demo data</span>
+  <span class="sp"></span>
+  <button class="ibtn" id="bell" aria-label="Notifications" aria-expanded="false">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+    <span class="badge" id="badge" hidden>0</span>
+  </button>
+  <button class="ibtn" id="mute" aria-pressed="false" title="Alert sounds">Sound on</button>
+  <button class="ibtn" id="theme" title="Switch light or dark">Theme</button>
+</header>
+<div class="bellpanel" id="bellpanel" hidden></div>
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab" role="tab" id="t-live" data-tab="live" aria-selected="true">Live scenario</button>
+  <button class="tab" role="tab" id="t-rules" data-tab="rules" aria-selected="false">Rules in plain English</button>
+  <button class="tab" role="tab" id="t-verify" data-tab="verify" aria-selected="false">Verify rewrite</button>
+  <button class="tab" role="tab" id="t-hand" data-tab="hand" aria-selected="false">Shift handoff</button>
+</nav>
+<main>
+  <section class="pane" id="pane-live" role="tabpanel">
+    <div class="card job">
+      <div class="meta">
+        <h2 id="jobTitle">Training job queued for Cluster B</h2>
+        <p class="muted" id="jobSub"></p>
+      </div>
+      <div class="clock" id="clock">T−90 s</div>
+      <button class="btn primary" id="go">Queue the training job</button>
+      <button class="btn" id="skip" disabled>Skip to end</button>
+      <button class="btn" id="reset" disabled>Reset</button>
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <div class="grid2">
+      <div class="charts">
+        <div class="card chartbox"><h3>Chilled-water supply temperature</h3><canvas id="c1" aria-label="Supply temperature over time"></canvas>
+          <div class="legend"><span><i style="border-color:var(--accent)"></i>This run</span><span><i style="border-color:var(--ink2);border-top-style:dashed"></i>If nobody acts</span><span><i style="border-color:var(--warn);border-top-style:dotted"></i>GPU throttle 15 °C</span><span><i style="border-color:var(--crit);border-top-style:dotted"></i>GPU shutdown 18 °C</span></div></div>
+        <div class="card chartbox"><h3>Heat to remove vs cooling available (kW)</h3><canvas id="c2" aria-label="Power and cooling capacity over time"></canvas>
+          <div class="legend"><span><i style="border-color:var(--accent)"></i>IT power (heat)</span><span><i style="border-color:var(--ok)"></i>Cooling capacity</span><span><i style="border-color:var(--info)"></i>Facility power</span><span><i style="border-color:var(--crit);border-top-style:dotted"></i>1,850 kW cap</span></div></div>
+      </div>
+      <div style="display:grid;gap:16px;align-content:start">
+        <div class="card opcard"><h3>Operator actions</h3>
+          <p id="opHint">Queue the job to see the pre-warning. Once it is running, you can step in here.</p>
+          <button class="btn primary" id="opCh2" disabled>Start chiller 2 now (manual override)</button>
+          <button class="btn" id="opAck" disabled>Acknowledge alert</button>
+        </div>
+        <div class="card"><h3>Event log</h3><ul class="feed" id="feed"></ul></div>
+      </div>
+    </div>
+    <div class="card result" id="result"></div>
+  </section>
+
+  <section class="pane" id="pane-rules" role="tabpanel" hidden>
+    <p class="intro">Interlock reads the old controller code and states each rule in plain English, with the exact lines it came from. Pick a rule to see where it lives, what it does, which past incidents it explains, and what needs a human decision.</p>
+    <div class="rules">
+      <div class="rlist" id="rlist"></div>
+      <div>
+        <div class="seg" role="group" aria-label="Which code to show"><button id="segL" aria-pressed="true">Original (legacy)</button><button id="segM" aria-pressed="false">Rewritten (modern)</button></div>
+        <div class="src" id="src" tabindex="0"></div>
+        <div class="detail" id="detail"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-verify" role="tabpanel" hidden>
+    <p class="intro">A rewrite is only safe if it behaves exactly like the original. This test feeds thousands of generated sensor readings into both versions and compares every output, every internal timer and every rule that fires. Break the rewrite on purpose to see the test catch it.</p>
+    <div class="vgrid">
+      <div class="card"><h3>Parity test</h3>
+        <div class="mbtns"><button class="btn primary" id="vrun">Run parity test</button></div>
+        <div class="bar"><i id="vbar"></i></div>
+        <div id="vout" class="muted">Running first check…</div>
+      </div>
+      <div class="card"><h3>Break it on purpose</h3>
+        <p class="muted" style="margin-bottom:10px;font-size:13px">Each button plants a small, realistic mistake in the rewrite and re-runs the test.</p>
+        <div class="bugs" id="bugs"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-hand" role="tabpanel" hidden>
+    <p class="intro" id="handIntro"></p>
+    <div class="hbar"><button class="btn primary" id="copy">Copy text</button><span class="muted" id="copied"></span></div>
+    <div class="hand" id="hand" tabindex="0"></div>
+  </section>
+</main>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="backdrop" id="backdrop" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle"></div>
+</div>
+
+<script>
+const DATA = /*DATA*/;
+</script>
+<script>
+/*ENGINE*/
+</script>
+<script>
+/*APP*/
+</script>
+</body>
+</html>

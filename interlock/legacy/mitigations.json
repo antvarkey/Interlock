@@ -1,0 +1,18 @@
+[
+  {
+    "id": "prestart_ch2",
+    "applies_to_sets": "TRP",
+    "kind": "operator",
+    "title": "Pre-start chiller 2 before the job",
+    "how": "Turn on the manual chiller 2 start override (MAN_C2) at least 60 seconds before the job starts, so a second chiller is carrying load when the ramp arrives.",
+    "sim": {"manual_ch2_lead_s": 60}
+  },
+  {
+    "id": "staged_start",
+    "applies_to_sets": "TRP",
+    "kind": "scheduler",
+    "title": "Start the job in two stages",
+    "how": "Ask the scheduler to start the job at about half power for 150 seconds, then go to full power, so the plant can stage chiller 2 in first.",
+    "sim": {"profile": "staged"}
+  }
+]

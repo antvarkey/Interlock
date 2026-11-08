@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interlock</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">INTER<span>LOCK</span></div>
+  <div class="pipeline">
+    <b>Legacy code</b> → <b>Plain-English rules</b> → <b>Verified rewrite</b> → <b>Warnings before it trips</b>
+  </div>
+  <nav id="nav">
+    <button data-tab="live" class="active">Live scenario</button>
+    <button data-tab="rules">Rules</button>
+    <button data-tab="verify">Verify</button>
+    <button data-tab="handoff">Shift handoff</button>
+  </nav>
+</header>
+
+<main>
+  <!-- LIVE -->
+  <section id="tab-live" class="tab active">
+    <div class="grid-live">
+      <div>
+        <div class="card">
+          <h3>1 · Job queued</h3>
+          <div class="small muted" style="margin-bottom:10px">A large training job is queued on the idle cluster and starts at t = 90 s. Choose how the job and plant are prepared.</div>
+          <label class="choice"><input type="radio" name="profile" value="single" checked>Start at full power immediately</label>
+          <label class="choice"><input type="radio" name="profile" value="staged">Start in two stages (half power for 150 s, then full)</label>
+          <label class="choice"><input type="checkbox" id="prestart">Operator turns on the chiller 2 manual override 60 s before the job</label>
+          <div id="verdict" class="verdict"></div>
+        </div>
+        <div id="prewarning"></div>
+      </div>
+      <div>
+        <div id="banner"></div>
+        <div class="card" style="padding:12px 16px">
+          <div class="row">
+            <button class="btn primary" id="run">▶ Run scenario</button>
+            <button class="btn" id="skip">Skip to end</button>
+            <select id="speed"><option value="5">5× speed</option><option value="10" selected>10× speed</option><option value="25">25× speed</option></select>
+            <div class="spacer"></div>
+            <div class="mono muted" id="clock">t = 0 s</div>
+          </div>
+        </div>
+        <canvas id="c-temp" height="230"></canvas>
+        <div class="legend"><span><i style="background:#e3a72f"></i>Chilled-water supply temperature</span><span><i style="background:#ff5d5d"></i>GPU throttle / shutdown limits</span></div>
+        <canvas id="c-pow" height="230"></canvas>
+        <div class="legend"><span><i style="background:#5aa9ff"></i>Heat from IT load (kW)</span><span><i style="background:#3ecf8e"></i>Cooling capacity available (kW)</span></div>
+        <div class="card"><h3>Event feed</h3><div class="feed" id="feed"><div class="muted small">Run the scenario to see events.</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RULES -->
+  <section id="tab-rules" class="tab">
+    <div class="card">
+      <div class="row">
+        <div id="rules-summary" class="row"></div>
+        <div class="spacer"></div>
+        <input type="text" id="ask-q" placeholder="Ask about the rules, e.g. why does cooling stop at job start?" style="width:380px">
+        <button class="btn" id="ask-go">Ask</button>
+      </div>
+      <div id="ask-a" class="small" style="margin-top:10px;display:none;white-space:pre-wrap"></div>
+    </div>
+    <div class="grid-rules">
+      <div id="rule-list"></div>
+      <div>
+        <div class="card" id="rule-detail"></div>
+        <div class="card"><h3>Original legacy code · <span id="src-name" class="mono">chw_sequencer.st</span></h3><div class="code" id="src"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VERIFY -->
+  <section id="tab-verify" class="tab">
+    <div class="two">
+      <div class="card">
+        <h3>Parity test · old code vs. rewrite</h3>
+        <div class="small muted" style="margin-bottom:12px">Both versions run on the same generated sensor sequences. Every output, every internal variable and the list of rules that fired is compared on every scan.</div>
+        <div class="row">
+          <button class="btn primary" id="p-run">Run parity test</button>
+          <button class="btn danger" id="p-bug1">Break it: trip threshold 20 → 21</button>
+          <button class="btn danger" id="p-bug2">Break it: lockout 300 → 120 s</button>
+        </div>
+        <div id="p-out" style="margin-top:16px"></div>
+      </div>
+      <div class="card">
+        <h3>Rule coverage in the generated tests</h3>
+        <div id="p-cov" class="small muted">Run the parity test to see how often each rule fired.</div>
+      </div>
+    </div>
+    <div class="card" id="llm-card" style="margin-bottom:16px">
+      <h3>Where the AI is used</h3>
+      <div class="small" style="margin-bottom:10px">The model <b>proposes</b>; the parity test above <b>decides</b>. The model never judges whether a job will trip cooling, and it is never the only evidence for a "verified" claim.</div>
+      <ul class="plain small" style="margin-bottom:12px">
+        <li><b>Rewrite proposal.</b> Reads the old code and writes a modern version. Screened for unsafe code, compared with the original on generated scenarios, then checked again on held-out ones. A failure goes back to the model with the first difference, up to 4 tries.</li>
+        <li><b>Glossary draft.</b> Suggests plain names for cryptic tags. A person approves them.</li>
+        <li><b>Operator Q&amp;A.</b> Answers questions from the extracted rules, findings and tickets only.</li>
+      </ul>
+      <div class="row"><button class="btn primary" id="llm-go">Ask the model for a rewrite</button><span class="small muted" id="llm-status">Checking…</span></div>
+      <div id="llm-out" style="margin-top:12px"></div>
+    </div>
+    <div class="two">
+      <div class="card"><h3>Legacy · Structured Text</h3><div class="code" id="v-old"></div></div>
+      <div class="card"><h3>Rewrite · generated Python</h3><div class="code" id="v-new"></div></div>
+    </div>
+  </section>
+
+  <!-- HANDOFF -->
+  <section id="tab-handoff" class="tab">
+    <div id="handoff"></div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

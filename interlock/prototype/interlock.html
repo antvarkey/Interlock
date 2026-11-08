@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interlock: cooling control warnings for data centers</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#f2efe8; --panel:#fbfaf6; --panel2:#ebe7dd; --ink:#1d2227; --ink2:#5a6169; --line:#d6d1c4;
+  --accent:#c2410c; --accent-ink:#ffffff; --crit:#b91c1c; --crit-bg:#fbe9e7; --warn:#a16207; --warn-bg:#fbf1d6;
+  --ok:#237a4b; --ok-bg:#e3f2e8; --info:#1d5fa8; --info-bg:#e5eef9; --code:#f6f4ee; --hl:#fde8c8; --shadow:0 10px 30px rgba(20,24,30,.18);
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace; --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#12161b; --panel:#1a2027; --panel2:#232b34; --ink:#e8e6df; --ink2:#9aa3ad; --line:#2f3944;
+  --accent:#fb923c; --accent-ink:#1a1206; --crit:#f87171; --crit-bg:#3a1c1c; --warn:#fbbf24; --warn-bg:#35290f;
+  --ok:#4ade80; --ok-bg:#16301f; --info:#7ab8f5; --info-bg:#15283d; --code:#151a20; --hl:#4a3515; --shadow:0 10px 30px rgba(0,0,0,.55);}}
+[data-theme=dark]{
+  --bg:#12161b; --panel:#1a2027; --panel2:#232b34; --ink:#e8e6df; --ink2:#9aa3ad; --line:#2f3944;
+  --accent:#fb923c; --accent-ink:#1a1206; --crit:#f87171; --crit-bg:#3a1c1c; --warn:#fbbf24; --warn-bg:#35290f;
+  --ok:#4ade80; --ok-bg:#16301f; --info:#7ab8f5; --info-bg:#15283d; --code:#151a20; --hl:#4a3515; --shadow:0 10px 30px rgba(0,0,0,.55);}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+h1,h2,h3,h4,p{margin:0}
+.mono{font-family:var(--mono)}
+.sr{position:absolute;left:-9999px}
+
+/* header */
+.top{display:flex;align-items:center;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.02em;font-size:18px}
+.brand svg{width:26px;height:26px}
+.site{font-size:12px;color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;white-space:nowrap}
+.site b{color:var(--ink);font-weight:600}
+.sp{flex:1}
+.ibtn{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:10px;height:36px;min-width:36px;padding:0 10px;display:inline-flex;align-items:center;gap:6px}
+.ibtn:hover{border-color:var(--ink2)}
+.ibtn:focus-visible,.btn:focus-visible,.tab:focus-visible,.rcard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.badge{position:absolute;top:-6px;right:-6px;background:var(--crit);color:#fff;border-radius:999px;font-size:11px;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 4px;font-weight:700}
+.badge[hidden]{display:none}
+
+.tabs{display:flex;gap:4px;padding:10px 24px 0;border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:61px;z-index:15}
+.tab{background:none;border:0;padding:9px 16px;border-radius:10px 10px 0 0;color:var(--ink2);font-weight:600;border-bottom:3px solid transparent}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent);background:var(--panel)}
+.tab .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--crit);margin-left:6px}
+main{padding:20px 24px 60px;max-width:1280px;margin:0 auto}
+.pane[hidden]{display:none}
+
+/* generic */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.card h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);margin-bottom:10px;font-weight:700}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-weight:600}
+.btn:hover:not(:disabled){border-color:var(--ink2)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover:not(:disabled){filter:brightness(1.07)}
+.btn.danger{background:var(--crit);color:#fff;border-color:var(--crit)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.chip{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;border:1px solid transparent}
+.chip.crit{background:var(--crit-bg);color:var(--crit)}.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}.chip.info{background:var(--info-bg);color:var(--info)}.chip.mute{background:var(--panel2);color:var(--ink2)}
+.muted{color:var(--ink2)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}
+@media(max-width:1000px){.grid2{grid-template-columns:1fr}.tabs{top:auto;position:static}}
+
+/* live */
+.job{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.job .meta{flex:1;min-width:240px}
+.job h2{font-size:18px}
+.clock{font-family:var(--mono);font-size:22px;font-weight:700;min-width:130px;text-align:right}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;border-left:5px solid var(--ok)}
+.tile .k{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.tile .v{font-family:var(--mono);font-size:22px;font-weight:700;line-height:1.25}
+.tile .s{font-size:12px;color:var(--ink2)}
+.tile.warn{border-left-color:var(--warn)}.tile.crit{border-left-color:var(--crit);background:var(--crit-bg)}.tile.info{border-left-color:var(--info)}
+.charts{display:grid;gap:16px}
+.chartbox canvas{width:100%;height:200px;display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin-top:6px}
+.legend i{display:inline-block;width:18px;height:0;border-top:3px solid;vertical-align:middle;margin-right:5px}
+.opcard .btn{width:100%;margin-bottom:8px}
+.opcard p{font-size:13px;color:var(--ink2);margin-bottom:10px}
+.feed{list-style:none;margin:0;padding:0;max-height:380px;overflow:auto}
+.feed li{display:grid;grid-template-columns:62px 1fr;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:13px}
+.feed li:first-child{border-top:0}
+.feed .ts{font-family:var(--mono);color:var(--ink2);font-size:12px}
+.feed li.crit .tx{color:var(--crit);font-weight:600}.feed li.warn .tx{color:var(--warn);font-weight:600}.feed li.ok .tx{color:var(--ok);font-weight:600}.feed li.action .tx{color:var(--info);font-weight:600}
+.result{margin-top:16px;display:none}
+.result.on{display:block}
+
+/* toasts */
+#toasts{position:fixed;bottom:18px;right:18px;z-index:60;display:flex;flex-direction:column-reverse;gap:10px;width:min(400px,calc(100vw - 36px));pointer-events:none}
+.toast{pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-left:6px solid var(--info);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px;animation:slide .25s ease-out}
+.toast.crit{border-left-color:var(--crit)}.toast.warn{border-left-color:var(--warn)}.toast.ok{border-left-color:var(--ok)}
+.toast.crit .tt{color:var(--crit)}
+.toast .row{display:flex;gap:8px;align-items:flex-start}
+.toast .tt{font-weight:700;flex:1}
+.toast .x{background:none;border:0;color:var(--ink2);font-size:18px;line-height:1;padding:0 2px}
+.toast .tb{font-size:13px;color:var(--ink2);margin-top:3px}
+.toast .ta{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.toast .cd{font-family:var(--mono);font-weight:700;margin-top:6px}
+.toast.pulse{animation:slide .25s ease-out,pulse 1.2s ease-in-out .3s infinite}
+@keyframes slide{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@keyframes pulse{50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--crit) 35%,transparent),var(--shadow)}}
+@media(prefers-reduced-motion:reduce){.toast,.toast.pulse{animation:none}}
+
+/* modal */
+.backdrop{position:fixed;inset:0;background:rgba(10,14,18,.6);z-index:80;display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow:auto}
+.backdrop[hidden]{display:none}
+.modal{background:var(--panel);border:1px solid var(--line);border-top:6px solid var(--crit);border-radius:16px;box-shadow:var(--shadow);width:min(720px,100%);padding:22px}
+.modal h2{font-size:21px;margin:8px 0 12px}
+.modal ul{margin:6px 0 14px;padding-left:20px}.modal li{margin:3px 0}
+.steps{display:grid;gap:10px;margin:8px 0 16px}
+.step{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2)}
+.step b{display:block;margin-bottom:2px}
+.step .v{margin-top:6px;font-size:13px;color:var(--ok);font-weight:600}
+.mbtns{display:flex;gap:8px;flex-wrap:wrap}
+.mbtns .sp{flex:1}
+details.watch{margin:6px 0 14px;font-size:13px}details.watch summary{cursor:pointer;color:var(--ink2);font-weight:600}
+
+/* bell panel */
+.bellpanel{position:fixed;top:64px;right:24px;width:min(420px,calc(100vw - 32px));max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);z-index:70;padding:12px}
+.bellpanel[hidden]{display:none}
+.note{display:grid;grid-template-columns:10px 1fr;gap:10px;padding:9px 4px;border-top:1px solid var(--line)}
+.note:first-of-type{border-top:0}
+.note .d{width:10px;height:10px;border-radius:50%;background:var(--info);margin-top:5px}
+.note.crit .d{background:var(--crit)}.note.warn .d{background:var(--warn)}.note.ok .d{background:var(--ok)}
+.note.read{opacity:.65}
+.note b{display:block}.note span{font-size:13px;color:var(--ink2)}.note time{font-size:11px;color:var(--ink2);font-family:var(--mono)}
+
+/* rules */
+.rules{display:grid;grid-template-columns:380px minmax(0,1fr);gap:16px}
+@media(max-width:1000px){.rules{grid-template-columns:1fr}}
+.rlist{display:grid;gap:10px;align-content:start}
+.rcard{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;width:100%}
+.rcard[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.rcard .h{display:flex;gap:6px;align-items:center;margin-bottom:5px;flex-wrap:wrap}
+.rcard .h b{font-family:var(--mono)}
+.rcard p{font-size:13px;color:var(--ink2)}
+.src{border:1px solid var(--line);border-radius:12px;background:var(--code);overflow:auto;max-height:420px;position:relative;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+.src div{display:grid;grid-template-columns:44px 1fr;white-space:pre}
+.src div i{font-style:normal;color:var(--ink2);text-align:right;padding-right:10px;user-select:none}
+.src div.hl{background:var(--hl)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.seg button{background:var(--panel2);border:0;padding:6px 14px;font-weight:600;color:var(--ink2)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+.detail{margin-top:14px;display:grid;gap:12px}
+.detail .tk{border-left:3px solid var(--line);padding-left:10px;font-size:13px}
+.detail .tk b{font-family:var(--mono)}
+.finding{padding:8px 10px;border-radius:10px;background:var(--warn-bg);color:var(--ink);font-size:13px}
+.finding b{color:var(--warn)}
+
+/* verify */
+.vgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px}
+@media(max-width:1000px){.vgrid{grid-template-columns:1fr}}
+.bar{height:8px;border-radius:999px;background:var(--panel2);overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .1s}
+.vres{border-radius:12px;padding:14px;margin-top:6px}
+.vres.ok{background:var(--ok-bg)}.vres.bad{background:var(--crit-bg)}
+.vres h4{font-size:16px;margin-bottom:4px}
+.vres table{border-collapse:collapse;margin-top:8px;font-size:13px;width:100%}
+.vres td,.vres th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+.cov{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.bugs{display:grid;gap:8px}
+
+/* handoff */
+.hand{white-space:pre-wrap;font-family:var(--mono);font-size:13px;line-height:1.6;background:var(--code);border:1px solid var(--line);border-radius:12px;padding:16px;max-height:600px;overflow:auto}
+.hbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.intro{font-size:13px;color:var(--ink2);margin-bottom:12px;max-width:80ch}
+
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="9" width="14" height="14" rx="4" fill="none" stroke="var(--accent)" stroke-width="3.5"/><rect x="15" y="9" width="14" height="14" rx="4" fill="none" stroke="var(--ink)" stroke-width="3.5"/></svg>
+    Interlock
+  </div>
+  <span class="site">Cluster B · <b>Hall 2 chilled water</b> · demo data</span>
+  <span class="sp"></span>
+  <button class="ibtn" id="bell" aria-label="Notifications" aria-expanded="false">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+    <span class="badge" id="badge" hidden>0</span>
+  </button>
+  <button class="ibtn" id="mute" aria-pressed="false" title="Alert sounds">Sound on</button>
+  <button class="ibtn" id="theme" title="Switch light or dark">Theme</button>
+</header>
+<div class="bellpanel" id="bellpanel" hidden></div>
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <button class="tab" role="tab" id="t-live" data-tab="live" aria-selected="true">Live scenario</button>
+  <button class="tab" role="tab" id="t-rules" data-tab="rules" aria-selected="false">Rules in plain English</button>
+  <button class="tab" role="tab" id="t-verify" data-tab="verify" aria-selected="false">Verify rewrite</button>
+  <button class="tab" role="tab" id="t-hand" data-tab="hand" aria-selected="false">Shift handoff</button>
+</nav>
+<main>
+  <section class="pane" id="pane-live" role="tabpanel">
+    <div class="card job">
+      <div class="meta">
+        <h2 id="jobTitle">Training job queued for Cluster B</h2>
+        <p class="muted" id="jobSub"></p>
+      </div>
+      <div class="clock" id="clock">T−90 s</div>
+      <button class="btn primary" id="go">Queue the training job</button>
+      <button class="btn" id="skip" disabled>Skip to end</button>
+      <button class="btn" id="reset" disabled>Reset</button>
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <div class="grid2">
+      <div class="charts">
+        <div class="card chartbox"><h3>Chilled-water supply temperature</h3><canvas id="c1" aria-label="Supply temperature over time"></canvas>
+          <div class="legend"><span><i style="border-color:var(--accent)"></i>This run</span><span><i style="border-color:var(--ink2);border-top-style:dashed"></i>If nobody acts</span><span><i style="border-color:var(--warn);border-top-style:dotted"></i>GPU throttle 15 °C</span><span><i style="border-color:var(--crit);border-top-style:dotted"></i>GPU shutdown 18 °C</span></div></div>
+        <div class="card chartbox"><h3>Heat to remove vs cooling available (kW)</h3><canvas id="c2" aria-label="Power and cooling capacity over time"></canvas>
+          <div class="legend"><span><i style="border-color:var(--accent)"></i>IT power (heat)</span><span><i style="border-color:var(--ok)"></i>Cooling capacity</span><span><i style="border-color:var(--info)"></i>Facility power</span><span><i style="border-color:var(--crit);border-top-style:dotted"></i>1,850 kW cap</span></div></div>
+      </div>
+      <div style="display:grid;gap:16px;align-content:start">
+        <div class="card opcard"><h3>Operator actions</h3>
+          <p id="opHint">Queue the job to see the pre-warning. Once it is running, you can step in here.</p>
+          <button class="btn primary" id="opCh2" disabled>Start chiller 2 now (manual override)</button>
+          <button class="btn" id="opAck" disabled>Acknowledge alert</button>
+        </div>
+        <div class="card"><h3>Event log</h3><ul class="feed" id="feed"></ul></div>
+      </div>
+    </div>
+    <div class="card result" id="result"></div>
+  </section>
+
+  <section class="pane" id="pane-rules" role="tabpanel" hidden>
+    <p class="intro">Interlock reads the old controller code and states each rule in plain English, with the exact lines it came from. Pick a rule to see where it lives, what it does, which past incidents it explains, and what needs a human decision.</p>
+    <div class="rules">
+      <div class="rlist" id="rlist"></div>
+      <div>
+        <div class="seg" role="group" aria-label="Which code to show"><button id="segL" aria-pressed="true">Original (legacy)</button><button id="segM" aria-pressed="false">Rewritten (modern)</button></div>
+        <div class="src" id="src" tabindex="0"></div>
+        <div class="detail" id="detail"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-verify" role="tabpanel" hidden>
+    <p class="intro">A rewrite is only safe if it behaves exactly like the original. This test feeds thousands of generated sensor readings into both versions and compares every output, every internal timer and every rule that fires. Break the rewrite on purpose to see the test catch it.</p>
+    <div class="vgrid">
+      <div class="card"><h3>Parity test</h3>
+        <div class="mbtns"><button class="btn primary" id="vrun">Run parity test</button></div>
+        <div class="bar"><i id="vbar"></i></div>
+        <div id="vout" class="muted">Running first check…</div>
+      </div>
+      <div class="card"><h3>Break it on purpose</h3>
+        <p class="muted" style="margin-bottom:10px;font-size:13px">Each button plants a small, realistic mistake in the rewrite and re-runs the test.</p>
+        <div class="bugs" id="bugs"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-hand" role="tabpanel" hidden>
+    <p class="intro" id="handIntro"></p>
+    <div class="hbar"><button class="btn primary" id="copy">Copy text</button><span class="muted" id="copied"></span></div>
+    <div class="hand" id="hand" tabindex="0"></div>
+  </section>
+</main>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="backdrop" id="backdrop" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle"></div>
+</div>
+
+<script>
+const DATA = {"rules": [{"id": "R1", "kind": "branch", "english": "When the supply temperature rise per scan is above 0.1 \u00b0C/s for 20 consecutive scans (about 20 s) and the cooling loop is not tripped, trip the cooling loop, set the restart lockout timer to 300 s, stop the cooling pumps, and stop chiller 2.", "condition": "The supply temperature rise per scan is above 0.1 \u00b0C/s for 20 consecutive scans (about 20 s) and the cooling loop is not tripped", "actions": ["trip the cooling loop", "set the restart lockout timer to 300 s", "stop the cooling pumps", "stop chiller 2"], "lines": [52, 56], "trigger_line": 52, "reads": ["RR_CT", "TRP"], "writes": ["CH2_CM", "LK_CT", "PMP_CM", "TRP"], "sets_true": ["TRP"], "interrupts": ["the cooling loop stops"], "protective": true, "tickets": [{"id": "INC-2291", "date": "2025-03-14", "text": "Cooling loop tripped about 30 seconds after a training job started on cluster B. Cause unknown. Loop restarted after the lockout."}, {"id": "INC-2347", "date": "2025-05-02", "text": "GPU thermal shutdown during job launch. Chilled water temperature climbed fast. No root cause found."}, {"id": "INC-2402", "date": "2025-07-19", "text": "CHW pumps stopped at job start. Restart was blocked for several minutes. Closed as unknown."}, {"id": "INC-2503", "date": "2025-10-27", "text": "Cooling tripped again when a 40-node job started. Same pattern as earlier tickets, possibly. Not investigated."}], "mitigations": [{"id": "prestart_ch2", "applies_to_sets": "TRP", "kind": "operator", "title": "Pre-start chiller 2 before the job", "how": "Turn on the manual chiller 2 start override (MAN_C2) at least 60 seconds before the job starts, so a second chiller is carrying load when the ramp arrives.", "sim": {"manual_ch2_lead_s": 60}}, {"id": "staged_start", "applies_to_sets": "TRP", "kind": "scheduler", "title": "Start the job in two stages", "how": "Ask the scheduler to start the job at about half power for 150 seconds, then go to full power, so the plant can stage chiller 2 in first.", "sim": {"profile": "staged"}}], "findings": [{"kind": "runbook_mismatch", "label": "Rate-of-rise trip threshold", "unit": "\u00b0C/s", "code_value": 0.1, "runbook_value": 0.15, "runbook_text": "0.15 \u00b0C/s", "rules": ["R1"], "lines": [52, 56], "text": "Rate-of-rise trip threshold: the code uses 0.1 \u00b0C/s but the runbook says 0.15 \u00b0C/s."}, {"kind": "runbook_mismatch", "label": "Restart lockout after a trip", "unit": "s", "code_value": 300, "runbook_value": 120.0, "runbook_text": "2 minutes", "rules": ["R1"], "lines": [52, 56], "text": "Restart lockout after a trip: the code uses 300 s but the runbook says 2 minutes."}]}, {"id": "R2", "kind": "branch", "english": "When the cooling loop is tripped and the restart lockout timer is above 0 s, decrease the restart lockout timer by 1 s.", "condition": "The cooling loop is tripped and the restart lockout timer is above 0 s", "actions": ["decrease the restart lockout timer by 1 s"], "lines": [61, 62], "trigger_line": 61, "reads": ["LK_CT", "TRP"], "writes": ["LK_CT"], "sets_true": [], "interrupts": [], "protective": false, "tickets": [], "mitigations": [], "findings": []}, {"id": "R3", "kind": "branch", "english": "When the cooling loop is tripped and the restart lockout timer is at or below 0 s, clear the cooling-loop trip and run the cooling pumps.", "condition": "The cooling loop is tripped and the restart lockout timer is at or below 0 s", "actions": ["clear the cooling-loop trip", "run the cooling pumps"], "lines": [63, 65], "trigger_line": 63, "reads": ["LK_CT", "TRP"], "writes": ["PMP_CM", "TRP"], "sets_true": ["PMP_CM"], "interrupts": [], "protective": false, "tickets": [], "mitigations": [], "findings": []}, {"id": "R4", "kind": "branch", "english": "When the chiller 1 load is at or above 80 % for 90 consecutive scans (about 90 s) and the cooling loop is not tripped, start chiller 2.", "condition": "The chiller 1 load is at or above 80 % for 90 consecutive scans (about 90 s) and the cooling loop is not tripped", "actions": ["start chiller 2"], "lines": [70, 71], "trigger_line": 70, "reads": ["ST_CT", "TRP"], "writes": ["CH2_CM"], "sets_true": ["CH2_CM"], "interrupts": [], "protective": false, "tickets": [], "mitigations": [], "findings": []}, {"id": "R5", "kind": "branch", "english": "When the manual chiller 2 start override is on and the cooling loop is not tripped, start chiller 2.", "condition": "The manual chiller 2 start override is on and the cooling loop is not tripped", "actions": ["start chiller 2"], "lines": [75, 76], "trigger_line": 75, "reads": ["MAN_C2", "TRP"], "writes": ["CH2_CM"], "sets_true": ["CH2_CM"], "interrupts": [], "protective": false, "tickets": [], "mitigations": [], "findings": []}, {"id": "R6", "kind": "follows", "english": "The load-shed command is on whenever the total facility power is above 1850 kW, and off otherwise.", "condition": "The total facility power is above 1850 kW", "actions": ["shed lowest-priority IT load"], "lines": [80, 80], "trigger_line": 80, "reads": ["PF1"], "writes": ["SHD_CM"], "sets_true": [], "interrupts": ["IT load is shed"], "protective": true, "tickets": [], "mitigations": [], "findings": []}, {"id": "R7", "kind": "branch", "english": "When the auxiliary condenser flow (tag AI_77) is above 0 L/s, raise alarm 9.", "condition": "The auxiliary condenser flow (tag AI_77) is above 0 L/s", "actions": ["raise alarm 9"], "lines": [83, 84], "trigger_line": 83, "reads": ["AI_77"], "writes": ["AL_9"], "sets_true": ["AL_9"], "interrupts": [], "protective": false, "tickets": [{"id": "INC-2418", "date": "2025-08-03", "text": "Alarm AI_77 never triggers in test. Ticket closed, no action taken."}], "mitigations": [], "findings": [{"kind": "dead_input", "label": "Retired tag AI_77", "rules": ["R7"], "lines": [83, 84], "text": "Tag AI_77 (Auxiliary condenser flow transmitter) was retired on 2016-02-09, so rule R7 can never fire."}]}], "derived": [{"var": "DT", "line": 34, "english": "Supply temperature rise per scan = chilled-water supply temperature minus supply temperature at the previous scan."}, {"var": "TS1_P", "line": 35, "english": "Supply temperature at the previous scan = chilled-water supply temperature."}], "findings": [{"kind": "runbook_ok", "label": "Facility power cap", "unit": "kW", "code_value": 1850.0, "runbook_value": 1850.0, "runbook_text": "1850 kW", "rules": ["R6"], "lines": [80, 80], "text": "Facility power cap: code and runbook agree (1850 kW)."}, {"kind": "runbook_mismatch", "label": "Rate-of-rise trip threshold", "unit": "\u00b0C/s", "code_value": 0.1, "runbook_value": 0.15, "runbook_text": "0.15 \u00b0C/s", "rules": ["R1"], "lines": [52, 56], "text": "Rate-of-rise trip threshold: the code uses 0.1 \u00b0C/s but the runbook says 0.15 \u00b0C/s."}, {"kind": "runbook_ok", "label": "Chiller 2 staging delay", "unit": "s", "code_value": 90, "runbook_value": 90.0, "runbook_text": "90 seconds", "rules": ["R4"], "lines": [70, 71], "text": "Chiller 2 staging delay: code and runbook agree (90 s)."}, {"kind": "runbook_mismatch", "label": "Restart lockout after a trip", "unit": "s", "code_value": 300, "runbook_value": 120.0, "runbook_text": "2 minutes", "rules": ["R1"], "lines": [52, 56], "text": "Restart lockout after a trip: the code uses 300 s but the runbook says 2 minutes."}, {"kind": "dead_input", "label": "Retired tag AI_77", "rules": ["R7"], "lines": [83, 84], "text": "Tag AI_77 (Auxiliary condenser flow transmitter) was retired on 2016-02-09, so rule R7 can never fire."}], "counters": {"RR_CT": {"cond": "the supply temperature rise per scan is above 0.1 \u00b0C/s", "line": 38}, "ST_CT": {"cond": "the chiller 1 load is at or above 80 %", "line": 45}}, "legacy_source": "(* ================================================================= *)\n(*  CHW PLANT SEQUENCER   V2.3    REV 2004-11-18   R.KOWALSKI         *)\n(*  HALL A / HALL B COMMON LOOP                                       *)\n(*  DO NOT MODIFY.  SEE PLANT OPS BEFORE ANY CHANGE.                  *)\n(*  SCAN = 1 SEC                                                      *)\n(* ================================================================= *)\n\nVAR_INPUT\n  TS1    : REAL;  (* CHW SUPPLY TEMP C *)\n  PF1    : REAL;  (* FACILITY POWER KW *)\n  CH1_LD : REAL;  (* CH1 LOAD PCT *)\n  CH2_ST : BOOL;  (* CH2 RUN STATUS *)\n  MAN_C2 : BOOL;  (* CH2 MANUAL START OVR *)\n  AI_77  : REAL;  (* AUX COND FLOW *)\nEND_VAR\n\nVAR\n  TS1_P  : REAL := 7.0;  (* TS1 LAST SCAN *)\n  DT     : REAL := 0.0;  (* TS1 DELTA *)\n  RR_CT  : INT := 0;     (* RISE COUNTER *)\n  ST_CT  : INT := 0;     (* STAGE COUNTER *)\n  LK_CT  : INT := 0;     (* LOCKOUT COUNTER *)\n  TRP    : BOOL := FALSE;  (* LOOP TRIP LATCH *)\nEND_VAR\n\nVAR_OUTPUT\n  CH2_CM : BOOL := FALSE;  (* CH2 START CMD *)\n  PMP_CM : BOOL := TRUE;   (* CHW PUMPS CMD *)\n  SHD_CM : BOOL := FALSE;  (* LOAD SHED CMD *)\n  AL_9   : BOOL := FALSE;  (* AUX FLOW ALARM *)\nEND_VAR\n\n(* --- SUPPLY TEMP DELTA --- *)\nDT := TS1 - TS1_P;\nTS1_P := TS1;\n\n(* --- RISE CHECK (PUMP PROTECT) --- *)\nIF DT > 0.10 THEN\n  RR_CT := RR_CT + 1;\nELSE\n  RR_CT := 0;\nEND_IF;\n\n(* --- CH1 HEAVY LOAD TIMER --- *)\nIF CH1_LD >= 80.0 THEN\n  ST_CT := ST_CT + 1;\nELSE\n  ST_CT := 0;\nEND_IF;\n\n(* --- TRIP --- *)\nIF RR_CT >= 20 AND NOT TRP THEN\n  TRP := TRUE;\n  LK_CT := 300;\n  PMP_CM := FALSE;\n  CH2_CM := FALSE;\nEND_IF;\n\n(* --- LOCKOUT / RESTART --- *)\nIF TRP THEN\n  IF LK_CT > 0 THEN\n    LK_CT := LK_CT - 1;\n  ELSE\n    TRP := FALSE;\n    PMP_CM := TRUE;\n  END_IF;\nEND_IF;\n\n(* --- CH2 STAGING --- *)\nIF ST_CT >= 90 AND NOT TRP THEN\n  CH2_CM := TRUE;\nEND_IF;\n\n(* --- CH2 MANUAL --- *)\nIF MAN_C2 AND NOT TRP THEN\n  CH2_CM := TRUE;\nEND_IF;\n\n(* --- POWER CAP --- *)\nSHD_CM := PF1 > 1850.0;\n\n(* --- AUX FLOW ALARM (ADDED 2011) --- *)\nIF AI_77 > 0.0 THEN\n  AL_9 := TRUE;\nEND_IF;\n", "modern_source": "\"\"\"Chilled-water plant sequencer (generated by Interlock).\n\nRewritten from chw_sequencer.st. Names come from the reviewed glossary, every\nrule is annotated with its plain-English meaning and original line numbers, and\nstep() reports which rules fired on each scan. Behaviour is checked against the\noriginal by the parity test; do not edit by hand.\n\"\"\"\n\nfrom __future__ import annotations\n\n\nclass ChwSequencer:\n    SCAN_SECONDS = 1.0\n    INPUTS = (\n        'chw_supply_temp_c',\n        'facility_power_kw',\n        'chiller1_load_pct',\n        'chiller2_running',\n        'chiller2_manual_start',\n        'aux_cond_flow_77',\n    )\n    OUTPUTS = (\n        'chiller2_start_cmd',\n        'cooling_pumps_cmd',\n        'load_shed_cmd',\n        'aux_flow_alarm',\n    )\n\n    def __init__(self) -> None:\n        self.reset()\n\n    def reset(self) -> None:\n        self.chw_supply_temp_prev_c = 7.0\n        self.chw_supply_temp_rise_c = 0.0\n        self.rise_counter = 0\n        self.stage_delay_counter = 0\n        self.restart_lockout_s = 0\n        self.cooling_loop_tripped = False\n        self.chiller2_start_cmd = False\n        self.cooling_pumps_cmd = True\n        self.load_shed_cmd = False\n        self.aux_flow_alarm = False\n\n    def step(\n        self,\n        *,\n        chw_supply_temp_c: float,\n        facility_power_kw: float,\n        chiller1_load_pct: float,\n        chiller2_running: bool,\n        chiller2_manual_start: bool,\n        aux_cond_flow_77: float,\n    ) -> tuple[dict, list[str]]:\n        fired: list[str] = []\n        # Supply temperature rise per scan = chilled-water supply temperature minus supply\n        # temperature at the previous scan.\n        self.chw_supply_temp_rise_c = chw_supply_temp_c - self.chw_supply_temp_prev_c\n        # Supply temperature at the previous scan = chilled-water supply temperature.\n        self.chw_supply_temp_prev_c = chw_supply_temp_c\n        # Counts consecutive scans while the supply temperature rise per scan is above 0.1 \u00b0C/s\n        # (original line 38).\n        if self.chw_supply_temp_rise_c > 0.1:\n            self.rise_counter = self.rise_counter + 1\n        else:\n            self.rise_counter = 0\n        # Counts consecutive scans while the chiller 1 load is at or above 80 % (original line\n        # 45).\n        if chiller1_load_pct >= 80.0:\n            self.stage_delay_counter = self.stage_delay_counter + 1\n        else:\n            self.stage_delay_counter = 0\n        if (self.rise_counter >= 20) and (not self.cooling_loop_tripped):\n            # R1 (original lines 52-56): When the supply temperature rise per scan is above 0.1\n            # \u00b0C/s for 20 consecutive scans (about 20 s) and the cooling loop is not tripped,\n            # trip the cooling loop, set the restart lockout timer to 300 s, stop the cooling\n            # pumps, and stop chiller 2.\n            fired.append('R1')\n            self.cooling_loop_tripped = True\n            self.restart_lockout_s = 300\n            self.cooling_pumps_cmd = False\n            self.chiller2_start_cmd = False\n        if self.cooling_loop_tripped:\n            if self.restart_lockout_s > 0:\n                # R2 (original lines 61-62): When the cooling loop is tripped and the restart\n                # lockout timer is above 0 s, decrease the restart lockout timer by 1 s.\n                fired.append('R2')\n                self.restart_lockout_s = self.restart_lockout_s - 1\n            else:\n                # R3 (original lines 63-65): When the cooling loop is tripped and the restart\n                # lockout timer is at or below 0 s, clear the cooling-loop trip and run the\n                # cooling pumps.\n                fired.append('R3')\n                self.cooling_loop_tripped = False\n                self.cooling_pumps_cmd = True\n        if (self.stage_delay_counter >= 90) and (not self.cooling_loop_tripped):\n            # R4 (original lines 70-71): When the chiller 1 load is at or above 80 % for 90\n            # consecutive scans (about 90 s) and the cooling loop is not tripped, start chiller\n            # 2.\n            fired.append('R4')\n            self.chiller2_start_cmd = True\n        if chiller2_manual_start and (not self.cooling_loop_tripped):\n            # R5 (original lines 75-76): When the manual chiller 2 start override is on and the\n            # cooling loop is not tripped, start chiller 2.\n            fired.append('R5')\n            self.chiller2_start_cmd = True\n        # R6 (original line 80): The load-shed command is on whenever the total facility power\n        # is above 1850 kW, and off otherwise.\n        self.load_shed_cmd = facility_power_kw > 1850.0\n        if self.load_shed_cmd:\n            fired.append('R6')\n        if aux_cond_flow_77 > 0.0:\n            # R7 (original lines 83-84): When the auxiliary condenser flow (tag AI_77) is above\n            # 0 L/s, raise alarm 9.\n            fired.append('R7')\n            self.aux_flow_alarm = True\n\n        outputs = {\n            \"chiller2_start_cmd\": self.chiller2_start_cmd,\n            \"cooling_pumps_cmd\": self.cooling_pumps_cmd,\n            \"load_shed_cmd\": self.load_shed_cmd,\n            \"aux_flow_alarm\": self.aux_flow_alarm,\n        }\n        return outputs, fired\n", "glossary": {"TS1": {"name": "chw_supply_temp_c", "desc": "chilled-water supply temperature", "unit": "\u00b0C"}, "PF1": {"name": "facility_power_kw", "desc": "total facility power", "unit": "kW", "runbook": {"label": "Facility power cap", "unit": "kW", "mode": "compare"}}, "CH1_LD": {"name": "chiller1_load_pct", "desc": "chiller 1 load", "unit": "%"}, "CH2_ST": {"name": "chiller2_running", "desc": "chiller 2 run status", "true_text": "chiller 2 is running", "false_text": "chiller 2 is not running"}, "MAN_C2": {"name": "chiller2_manual_start", "desc": "manual chiller 2 start override", "true_text": "the manual chiller 2 start override is on", "false_text": "the manual chiller 2 start override is off"}, "AI_77": {"name": "aux_cond_flow_77", "desc": "auxiliary condenser flow (tag AI_77)", "unit": "L/s"}, "TS1_P": {"name": "chw_supply_temp_prev_c", "desc": "supply temperature at the previous scan", "unit": "\u00b0C"}, "DT": {"name": "chw_supply_temp_rise_c", "desc": "supply temperature rise per scan", "unit": "\u00b0C/s", "runbook": {"label": "Rate-of-rise trip threshold", "unit": "\u00b0C/s", "mode": "compare"}}, "RR_CT": {"name": "rise_counter", "desc": "rate-of-rise counter", "unit": "scans"}, "ST_CT": {"name": "stage_delay_counter", "desc": "chiller 1 heavy-load counter", "unit": "scans", "runbook": {"label": "Chiller 2 staging delay", "unit": "s", "mode": "compare"}}, "LK_CT": {"name": "restart_lockout_s", "desc": "restart lockout timer", "unit": "s", "runbook": {"label": "Restart lockout after a trip", "unit": "s", "mode": "assign"}}, "TRP": {"name": "cooling_loop_tripped", "desc": "cooling-loop trip latch", "true_text": "the cooling loop is tripped", "false_text": "the cooling loop is not tripped", "set_true": "trip the cooling loop", "set_false": "clear the cooling-loop trip", "also_known_as": "thermal shutdown overheating chilled water pumps stopped"}, "CH2_CM": {"name": "chiller2_start_cmd", "desc": "chiller 2 start command", "true_text": "chiller 2 is commanded to start", "false_text": "chiller 2 is not commanded to start", "set_true": "start chiller 2", "set_false": "stop chiller 2"}, "PMP_CM": {"name": "cooling_pumps_cmd", "desc": "cooling pump command", "true_text": "the cooling pumps are commanded on", "false_text": "the cooling pumps are commanded off", "set_true": "run the cooling pumps", "set_false": "stop the cooling pumps", "impact_false": "the cooling loop stops", "also_known_as": "thermal shutdown overheating chilled water pumps stopped"}, "SHD_CM": {"name": "load_shed_cmd", "desc": "load-shed command", "true_text": "the load-shed command is on", "false_text": "the load-shed command is off", "set_true": "shed lowest-priority IT load", "set_false": "release load shedding", "impact_true": "IT load is shed"}, "AL_9": {"name": "aux_flow_alarm", "desc": "auxiliary flow alarm", "true_text": "alarm 9 is on", "false_text": "alarm 9 is off", "set_true": "raise alarm 9", "set_false": "clear alarm 9"}}, "tickets": [{"id": "INC-2291", "date": "2025-03-14", "text": "Cooling loop tripped about 30 seconds after a training job started on cluster B. Cause unknown. Loop restarted after the lockout."}, {"id": "INC-2347", "date": "2025-05-02", "text": "GPU thermal shutdown during job launch. Chilled water temperature climbed fast. No root cause found."}, {"id": "INC-2402", "date": "2025-07-19", "text": "CHW pumps stopped at job start. Restart was blocked for several minutes. Closed as unknown."}, {"id": "INC-2418", "date": "2025-08-03", "text": "Alarm AI_77 never triggers in test. Ticket closed, no action taken."}, {"id": "INC-2455", "date": "2025-09-12", "text": "Fan noise complaint in hall 3. Fan bearing replaced."}, {"id": "INC-2460", "date": "2025-09-20", "text": "UPS battery module replaced during scheduled maintenance."}, {"id": "INC-2503", "date": "2025-10-27", "text": "Cooling tripped again when a 40-node job started. Same pattern as earlier tickets, possibly. Not investigated."}], "facts": {"power_cap_kw": 1850.0, "lockout_s": 300}, "plant": {"idle_kw": 180.0, "full_kw": 1400.0, "ramp_s": 8, "staged_frac": 0.5, "staged_hold_s": 150, "chiller_cap_kw": 900.0, "ch2_delay_s": 15, "ch2_ramp_s": 30, "loop_kj_per_c": 4000.0, "kp_kw_per_c": 150.0, "setpoint_c": 7.0, "throttle_c": 15.0, "shutdown_c": 18.0, "chiller_kw_per_kw": 0.25, "pump_kw": 20.0, "shed_frac": 0.15, "job_start_s": 90, "duration_s": 420}, "decls": [{"name": "TS1", "type": "REAL", "init": null, "block": "input", "comment": "CHW SUPPLY TEMP C"}, {"name": "PF1", "type": "REAL", "init": null, "block": "input", "comment": "FACILITY POWER KW"}, {"name": "CH1_LD", "type": "REAL", "init": null, "block": "input", "comment": "CH1 LOAD PCT"}, {"name": "CH2_ST", "type": "BOOL", "init": null, "block": "input", "comment": "CH2 RUN STATUS"}, {"name": "MAN_C2", "type": "BOOL", "init": null, "block": "input", "comment": "CH2 MANUAL START OVR"}, {"name": "AI_77", "type": "REAL", "init": null, "block": "input", "comment": "AUX COND FLOW"}, {"name": "TS1_P", "type": "REAL", "init": 7.0, "block": "internal", "comment": "TS1 LAST SCAN"}, {"name": "DT", "type": "REAL", "init": 0.0, "block": "internal", "comment": "TS1 DELTA"}, {"name": "RR_CT", "type": "INT", "init": 0, "block": "internal", "comment": "RISE COUNTER"}, {"name": "ST_CT", "type": "INT", "init": 0, "block": "internal", "comment": "STAGE COUNTER"}, {"name": "LK_CT", "type": "INT", "init": 0, "block": "internal", "comment": "LOCKOUT COUNTER"}, {"name": "TRP", "type": "BOOL", "init": false, "block": "internal", "comment": "LOOP TRIP LATCH"}, {"name": "CH2_CM", "type": "BOOL", "init": false, "block": "output", "comment": "CH2 START CMD"}, {"name": "PMP_CM", "type": "BOOL", "init": true, "block": "output", "comment": "CHW PUMPS CMD"}, {"name": "SHD_CM", "type": "BOOL", "init": false, "block": "output", "comment": "LOAD SHED CMD"}, {"name": "AL_9", "type": "BOOL", "init": false, "block": "output", "comment": "AUX FLOW ALARM"}], "ast": [{"t": "assign", "name": "DT", "expr": ["bin", "-", ["var", "TS1"], ["var", "TS1_P"]], "line": 34}, {"t": "assign", "name": "TS1_P", "expr": ["var", "TS1"], "line": 35}, {"t": "if", "line": 38, "end": 42, "branches": [{"cond": ["bin", ">", ["var", "DT"], ["num", 0.1]], "line": 38, "body": [{"t": "assign", "name": "RR_CT", "expr": ["bin", "+", ["var", "RR_CT"], ["num", 1]], "line": 39}]}, {"cond": null, "line": 40, "body": [{"t": "assign", "name": "RR_CT", "expr": ["num", 0], "line": 41}]}]}, {"t": "if", "line": 45, "end": 49, "branches": [{"cond": ["bin", ">=", ["var", "CH1_LD"], ["num", 80.0]], "line": 45, "body": [{"t": "assign", "name": "ST_CT", "expr": ["bin", "+", ["var", "ST_CT"], ["num", 1]], "line": 46}]}, {"cond": null, "line": 47, "body": [{"t": "assign", "name": "ST_CT", "expr": ["num", 0], "line": 48}]}]}, {"t": "if", "line": 52, "end": 57, "branches": [{"cond": ["bin", "AND", ["bin", ">=", ["var", "RR_CT"], ["num", 20]], ["un", "NOT", ["var", "TRP"]]], "line": 52, "body": [{"t": "assign", "name": "TRP", "expr": ["bool", true], "line": 53}, {"t": "assign", "name": "LK_CT", "expr": ["num", 300], "line": 54}, {"t": "assign", "name": "PMP_CM", "expr": ["bool", false], "line": 55}, {"t": "assign", "name": "CH2_CM", "expr": ["bool", false], "line": 56}]}]}, {"t": "if", "line": 60, "end": 67, "branches": [{"cond": ["var", "TRP"], "line": 60, "body": [{"t": "if", "line": 61, "end": 66, "branches": [{"cond": ["bin", ">", ["var", "LK_CT"], ["num", 0]], "line": 61, "body": [{"t": "assign", "name": "LK_CT", "expr": ["bin", "-", ["var", "LK_CT"], ["num", 1]], "line": 62}]}, {"cond": null, "line": 63, "body": [{"t": "assign", "name": "TRP", "expr": ["bool", false], "line": 64}, {"t": "assign", "name": "PMP_CM", "expr": ["bool", true], "line": 65}]}]}]}]}, {"t": "if", "line": 70, "end": 72, "branches": [{"cond": ["bin", "AND", ["bin", ">=", ["var", "ST_CT"], ["num", 90]], ["un", "NOT", ["var", "TRP"]]], "line": 70, "body": [{"t": "assign", "name": "CH2_CM", "expr": ["bool", true], "line": 71}]}]}, {"t": "if", "line": 75, "end": 77, "branches": [{"cond": ["bin", "AND", ["var", "MAN_C2"], ["un", "NOT", ["var", "TRP"]]], "line": 75, "body": [{"t": "assign", "name": "CH2_CM", "expr": ["bool", true], "line": 76}]}]}, {"t": "assign", "name": "SHD_CM", "expr": ["bin", ">", ["var", "PF1"], ["num", 1850.0]], "line": 80}, {"t": "if", "line": 83, "end": 85, "branches": [{"cond": ["bin", ">", ["var", "AI_77"], ["num", 0.0]], "line": 83, "body": [{"t": "assign", "name": "AL_9", "expr": ["bool", true], "line": 84}]}]}], "hooks": {"52": "R1", "61": "R2", "63": "R3", "70": "R4", "75": "R5", "80": "R6", "83": "R7"}, "mitigations": [{"id": "prestart_ch2", "applies_to_sets": "TRP", "kind": "operator", "title": "Pre-start chiller 2 before the job", "how": "Turn on the manual chiller 2 start override (MAN_C2) at least 60 seconds before the job starts, so a second chiller is carrying load when the ramp arrives.", "sim": {"manual_ch2_lead_s": 60}}, {"id": "staged_start", "applies_to_sets": "TRP", "kind": "scheduler", "title": "Start the job in two stages", "how": "Ask the scheduler to start the job at about half power for 150 seconds, then go to full power, so the plant can stage chiller 2 in first.", "sim": {"profile": "staged"}}]};
+</script>
+<script>
+/* Interlock engine in JavaScript: legacy interpreter, rewritten controller, plant model,
+   predictor, alerts and handoff. Mirrors the Python engine; checked against it in tests. */
+const IL = (() => {
+  const D = DATA;
+  const P = D.plant;
+  const ruleById = Object.fromEntries(D.rules.map((r) => [r.id, r]));
+  const protectiveIds = new Set(D.rules.filter((r) => r.protective).map((r) => r.id));
+
+  /* ------------------------------------------------------------ legacy interpreter (runs the parsed original code) */
+  function ev(e, env) {
+    switch (e[0]) {
+      case "num": case "bool": return e[1];
+      case "var": return env[e[1]];
+      case "un": { const v = ev(e[2], env); return e[1] === "NOT" ? !v : -v; }
+      default: {
+        const l = ev(e[2], env), r = ev(e[3], env);
+        switch (e[1]) {
+          case "AND": return !!l && !!r; case "OR": return !!l || !!r;
+          case "+": return l + r; case "-": return l - r; case "*": return l * r; case "/": return l / r;
+          case "=": return l === r; case "<>": return l !== r; case "<": return l < r;
+          case ">": return l > r; case "<=": return l <= r; case ">=": return l >= r;
+        }
+      }
+    }
+  }
+  class LegacyController {
+    constructor() { this.reset(); }
+    reset() {
+      this.env = {};
+      for (const d of D.decls) this.env[d.name] = d.init !== null ? d.init : d.type === "BOOL" ? false : 0;
+    }
+    run(stmts, fired) {
+      for (const s of stmts) {
+        if (s.t === "assign") {
+          const v = ev(s.expr, this.env);
+          this.env[s.name] = v;
+          const rid = D.hooks[s.line];
+          if (rid && v === true) fired.push(rid);
+        } else {
+          for (const b of s.branches) {
+            if (b.cond === null || ev(b.cond, this.env)) {
+              const rid = D.hooks[b.line];
+              if (rid) fired.push(rid);
+              this.run(b.body, fired);
+              break;
+            }
+          }
+        }
+      }
+    }
+    step(inputs) {
+      for (const d of D.decls) if (d.block === "input") this.env[d.name] = inputs[d.name];
+      const fired = [];
+      this.run(D.ast, fired);
+      return fired;
+    }
+  }
+
+  /* ------------------------------------------------------------ rewritten controller (port of the generated Python) */
+  const newCtrl = (cfg = {}) => ({
+    cfg: { tripScans: 20, lockoutS: 300, ...cfg },
+    s: { prev: 7.0, rise: 0.0, riseCt: 0, stageCt: 0, lockout: 0, tripped: false, ch2Cmd: false, pumps: true, shed: false, alarm: false },
+  });
+  function ctrlStep(c, i) {
+    const s = c.s, fired = [];
+    s.rise = i.temp - s.prev;
+    s.prev = i.temp;
+    s.riseCt = s.rise > 0.1 ? s.riseCt + 1 : 0;
+    s.stageCt = i.ch1 >= 80.0 ? s.stageCt + 1 : 0;
+    if (s.riseCt >= c.cfg.tripScans && !s.tripped) {
+      fired.push("R1"); s.tripped = true; s.lockout = c.cfg.lockoutS; s.pumps = false; s.ch2Cmd = false;
+    }
+    if (s.tripped) {
+      if (s.lockout > 0) { fired.push("R2"); s.lockout -= 1; }
+      else { fired.push("R3"); s.tripped = false; s.pumps = true; }
+    }
+    if (s.stageCt >= 90 && !s.tripped) { fired.push("R4"); s.ch2Cmd = true; }
+    if (i.man && !s.tripped) { fired.push("R5"); s.ch2Cmd = true; }
+    s.shed = i.power > 1850.0;
+    if (s.shed) fired.push("R6");
+    if (i.aux > 0.0) { fired.push("R7"); s.alarm = true; }
+    return { out: { ch2Cmd: s.ch2Cmd, pumps: s.pumps, shed: s.shed, alarm: s.alarm }, fired };
+  }
+
+  /* ------------------------------------------------------------ plant */
+  function jobTarget(profile, t) {
+    if (t < P.job_start_s) return P.idle_kw;
+    const x = t - P.job_start_s;
+    if (profile === "staged") {
+      const half = P.idle_kw + (P.full_kw - P.idle_kw) * P.staged_frac;
+      if (x < P.staged_hold_s) return P.idle_kw + (half - P.idle_kw) * Math.min(1, x / P.ramp_s);
+      return half + (P.full_kw - half) * Math.min(1, (x - P.staged_hold_s) / P.ramp_s);
+    }
+    return P.idle_kw + (P.full_kw - P.idle_kw) * Math.min(1, x / P.ramp_s);
+  }
+  const newPlant = () => ({
+    temp: P.setpoint_c, ch2t: 0, pumpOn: true, shutdown: false, it: P.idle_kw, cool: P.idle_kw, cap: P.chiller_cap_kw,
+    fac: P.idle_kw * (1 + P.chiller_kw_per_kw) + P.pump_kw,
+  });
+  function sensors(pl, man) {
+    return { temp: pl.temp, power: pl.fac, ch1: pl.cap > 0 ? (100 * pl.cool) / pl.cap : 0, ch2run: pl.ch2t >= P.ch2_delay_s, man, aux: 0.0 };
+  }
+  function plantAdvance(pl, out, target) {
+    pl.pumpOn = out.pumps;
+    pl.ch2t = out.ch2Cmd && pl.pumpOn ? pl.ch2t + 1 : 0;
+    let it = out.shed ? target * (1 - P.shed_frac) : target;
+    if (pl.temp >= P.shutdown_c) pl.shutdown = true;
+    if (pl.shutdown) it = 0; else if (pl.temp >= P.throttle_c) it *= 0.4;
+    let cap2 = 0;
+    if (pl.ch2t >= P.ch2_delay_s) cap2 = P.chiller_cap_kw * Math.min(1, (pl.ch2t - P.ch2_delay_s) / P.ch2_ramp_s);
+    pl.cap = pl.pumpOn ? P.chiller_cap_kw + cap2 : P.chiller_cap_kw;
+    const capNow = pl.pumpOn ? P.chiller_cap_kw + cap2 : 0;
+    const cool = !pl.pumpOn ? 0 : Math.max(0, Math.min(capNow, it + P.kp_kw_per_c * (pl.temp - P.setpoint_c)));
+    pl.temp += (it - cool) / P.loop_kj_per_c;
+    pl.it = it; pl.cool = cool;
+    pl.fac = it + P.chiller_kw_per_kw * cool + (pl.pumpOn ? P.pump_kw : 0);
+  }
+
+  /* ------------------------------------------------------------ a run you can step, clone and change mid-flight */
+  class Run {
+    constructor(profile = "single", ctrlCfg = {}) {
+      this.profile = profile; this.t = 0; this.pl = newPlant(); this.c = newCtrl(ctrlCfg);
+      this.manualAt = null; // second from which the manual chiller 2 override is on
+      this.series = { t: [], temp: [], it: [], fac: [], cap: [], cool: [] };
+      this.log = []; // fired rule ids per scan
+    }
+    get done() { return this.t >= P.duration_s; }
+    step() {
+      const man = this.manualAt !== null && this.t >= this.manualAt;
+      const { out, fired } = ctrlStep(this.c, sensors(this.pl, man));
+      plantAdvance(this.pl, out, jobTarget(this.profile, this.t));
+      const s = this.series;
+      s.t.push(this.t); s.temp.push(this.pl.temp); s.it.push(this.pl.it); s.fac.push(this.pl.fac);
+      s.cap.push(this.pl.pumpOn ? this.pl.cap : 0); s.cool.push(this.pl.cool);
+      this.log.push(fired);
+      this.t += 1;
+      return fired;
+    }
+    /* cheap copy for what-if forecasting: only state, not history */
+    fork() {
+      const r = new Run(this.profile, this.c.cfg);
+      r.t = this.t; r.pl = { ...this.pl }; r.c = { cfg: this.c.cfg, s: { ...this.c.s } }; r.manualAt = this.manualAt;
+      return r;
+    }
+  }
+
+  /* run to the end (or until a protective rule fires) and summarise */
+  function forecast(run, { stopAtTrip = false } = {}) {
+    const r = run.fork();
+    let primary = null, throttleT = null, shutdownT = null, peakT = r.pl.temp, peakFac = r.pl.fac, peakIt = r.pl.it;
+    while (!r.done) {
+      const f = r.step();
+      if (r.pl.temp > peakT) peakT = r.pl.temp;
+      if (r.pl.fac > peakFac) peakFac = r.pl.fac;
+      if (r.pl.it > peakIt) peakIt = r.pl.it;
+      if (r.t - 1 >= P.job_start_s) {
+        for (const id of f) if (protectiveIds.has(id) && !primary) primary = { rule: id, t: r.t - 1 };
+      }
+      if (throttleT === null && r.pl.temp >= P.throttle_c) throttleT = r.t - 1;
+      if (shutdownT === null && r.pl.temp >= P.shutdown_c) shutdownT = r.t - 1;
+      if (stopAtTrip && primary) break;
+    }
+    return {
+      willTrip: !!primary, primary, tripAfterStart: primary ? primary.t - P.job_start_s : null, throttleT, shutdownT,
+      outcome: shutdownT !== null ? "thermal_shutdown" : throttleT !== null ? "throttle" : "ok",
+      peakTemp: peakT, peakIt, peakFac, capMargin: D.facts.power_cap_kw - peakFac,
+    };
+  }
+  function plan(profile, leadS) {
+    const r = new Run(profile);
+    if (leadS !== null && leadS !== undefined) r.manualAt = Math.max(0, P.job_start_s - leadS);
+    return r;
+  }
+  const predictPlan = (profile, leadS) => forecast(plan(profile, leadS));
+
+  /* seconds from now during which turning on the manual override still avoids a trip */
+  function actWithin(run) {
+    let best = null;
+    for (let d = 0; d <= 60; d++) {
+      const r = run.fork(); r.manualAt = run.t + d;
+      if (!forecast(r).willTrip) best = d;
+    }
+    return best;
+  }
+
+  /* ------------------------------------------------------------ alerts and handoff text */
+  const fmt = (n, d = 0) => Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const cap1 = (s) => s[0].toUpperCase() + s.slice(1);
+
+  function verifiedSteps() {
+    const r1 = ruleById.R1;
+    return r1.mitigations.map((m) => {
+      const sim = m.sim || {};
+      const p = predictPlan(sim.profile || "single", sim.manual_ch2_lead_s ?? null);
+      return { ...m, avoidsTrip: !p.willTrip, peakTemp: p.peakTemp, peakFac: p.peakFac, margin: p.capMargin };
+    });
+  }
+
+  function prewarning() {
+    const p = predictPlan("single", null);
+    if (!p.willTrip) return { level: "ok", title: "No protective rule is predicted to fire at job start", pred: p };
+    const rule = ruleById[p.primary.rule];
+    const what = rule.interrupts[0];
+    const ev = [
+      `The job takes IT power from ${fmt(P.idle_kw)} kW to ${fmt(p.peakIt)} kW in about ${P.ramp_s} s.`,
+      `One chiller can remove about ${fmt(P.chiller_cap_kw)} kW, so heat exceeds cooling by about ${fmt(p.peakIt - P.chiller_cap_kw)} kW.`,
+      `Rule ${rule.id} (lines ${rule.lines[0]}-${rule.lines[1]}) acts about ${p.tripAfterStart} s after the job starts.`,
+      `GPUs reach shutdown temperature about ${p.shutdownT - P.job_start_s} s after the job starts.`,
+      `Cooling restart is then blocked for ${fmt(D.facts.lockout_s)} s by rules R2 and R3.`,
+    ];
+    return {
+      level: "critical", pred: p, rule, evidence: ev, steps: verifiedSteps(),
+      title: `${cap1(what)} about ${p.tripAfterStart} s after the job starts`,
+      watchouts: rule.findings.map((f) => f.text), tickets: rule.tickets,
+    };
+  }
+
+  /* parity test, in the browser: legacy interpreter vs rewritten controller on generated sensor sequences */
+  function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  function genInputs(rnd, scans, heavy) {
+    const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+    const seg = (make) => { const out = []; while (out.length < scans) out.push(...make(5 + Math.floor(rnd() * 36))); return out.slice(0, scans); };
+    let temp = 7.0;
+    const temps = seg((k) => {
+      const r = rnd(), mode = r < 0.4 ? "flat" : r < 0.8 ? "rise" : "fall";
+      const slope = mode === "flat" ? 0 : mode === "rise" ? 0.05 + rnd() * 0.3 : -(0.02 + rnd() * 0.08);
+      const v = [];
+      for (let i = 0; i < k; i++) { temp = Math.min(30, Math.max(3, temp + slope + (mode === "flat" ? (rnd() - 0.5) * 0.04 : 0))); v.push(temp); }
+      return v;
+    });
+    const power = seg((k) => Array(k).fill(pick([300, 900, 1700, 1849, 1851, 2100]) + (rnd() - 0.5) * 60));
+    const loads = seg((k) => Array(k).fill(pick([15, 55, 79.9, 80, 95, 100])));
+    if (heavy) for (let i = 0; i < Math.min(110, scans); i++) loads[i] = 95;
+    const man = seg((k) => Array(k).fill(rnd() < 0.15));
+    const aux = seg((k) => Array(k).fill(rnd() < 0.9 ? 0.0 : 0.1 + rnd() * 4.9));
+    return temps.map((_, i) => ({ temp: temps[i], power: power[i], ch1: loads[i], man: man[i], aux: aux[i] }));
+  }
+  const BUGS = {
+    off_by_one: { cfg: { tripScans: 21 }, text: "Trip counter threshold changed from 20 to 21 scans" },
+    lockout: { cfg: { lockoutS: 120 }, text: "Restart lockout changed from 300 s to 120 s" },
+  };
+  const LEG = { temp: "TS1", power: "PF1", ch1: "CH1_LD", man: "MAN_C2", aux: "AI_77" };
+  const PAIR = [["lockout", "LK_CT"], ["tripped", "TRP"], ["ch2Cmd", "CH2_CM"], ["pumps", "PMP_CM"], ["shed", "SHD_CM"], ["alarm", "AL_9"], ["riseCt", "RR_CT"], ["stageCt", "ST_CT"]];
+  const NAMES = { lockout: "restart_lockout_s", tripped: "cooling_loop_tripped", ch2Cmd: "chiller2_start_cmd", pumps: "cooling_pumps_cmd", shed: "load_shed_cmd", alarm: "aux_flow_alarm", riseCt: "rise_counter", stageCt: "stage_delay_counter" };
+
+  /* runs in slices so the page stays responsive; calls onProgress(done, total) and resolves with the result */
+  function parityTest({ sequences = 400, bug = null, onProgress = () => {} } = {}) {
+    const cfg = bug ? BUGS[bug].cfg : {};
+    const master = prng(7), cov = Object.fromEntries(D.rules.map((r) => [r.id, 0]));
+    let scans = 0, mismatches = 0, first = null, i = 0;
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const slice = () => {
+        const end = Math.min(sequences, i + 10);
+        for (; i < end; i++) {
+          const rnd = prng(Math.floor(master() * 4294967296));
+          const long = i % 4 === 0, n = long ? 400 : 150;
+          const seq = genInputs(rnd, n, i % 3 === 0);
+          if (long) {
+            for (let k = 5; k < 40; k++) seq[k].temp = 7.0 + 0.2 * (k - 4);
+            for (let k = 40; k < n; k++) seq[k].temp = seq[39].temp;
+          }
+          const leg = new LegacyController(), mod = newCtrl(cfg);
+          for (let k = 0; k < n; k++) {
+            const inp = seq[k];
+            const li = { TS1: inp.temp, PF1: inp.power, CH1_LD: inp.ch1, CH2_ST: false, MAN_C2: inp.man, AI_77: inp.aux };
+            const lf = leg.step(li);
+            const mf = ctrlStep(mod, inp).fired;
+            scans++;
+            for (const id of lf) cov[id]++;
+            const diffs = [];
+            for (const [m, l] of PAIR) if (leg.env[l] !== mod.s[m]) diffs.push({ field: NAMES[m], legacy: leg.env[l], rewrite: mod.s[m] });
+            if (lf.join() !== mf.join()) diffs.push({ field: "rules fired", legacy: lf.join(",") || "none", rewrite: mf.join(",") || "none" });
+            if (diffs.length) { mismatches++; if (!first) first = { sequence: i, scan: k, diffs }; break; }
+          }
+        }
+        onProgress(i, sequences);
+        if (i < sequences) setTimeout(slice, 0);
+        else resolve({
+          passed: mismatches === 0, sequences, scans, mismatches, first, cov, bugText: bug ? BUGS[bug].text : null,
+          covered: Object.values(cov).filter((v) => v > 0).length, total: D.rules.length, seconds: ((performance.now() - t0) / 1000).toFixed(2),
+        });
+      };
+      setTimeout(slice, 0);
+    });
+  }
+
+  return { D, P, ruleById, protectiveIds, Run, LegacyController, newCtrl, ctrlStep, forecast, predictPlan, actWithin, prewarning, verifiedSteps, parityTest, BUGS, fmt, cap1 };
+})();
+if (typeof module !== "undefined") module.exports = IL;
+
+</script>
+<script>
+(() => {
+const { D, P, fmt, Run, forecast, actWithin, prewarning, parityTest, BUGS, ruleById } = IL;
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const JS = P.job_start_s;
+const rel = (t) => (t < JS ? `T−${JS - t} s` : `T+${t - JS} s`);
+
+const S = {
+  run: null, phase: "idle", plan: { lead: null, staged: false }, events: [], notes: [], muted: false,
+  seen: {}, alert: null, alertDone: false, acked: false, skip: false, ghost: null, pw: null, handoff: null, outcome: null, audio: null,
+};
+
+/* ------------------------------------------------------------ the do-nothing forecast, drawn faintly behind the live run */
+function ghostRun() {
+  const r = new Run("single"); while (!r.done) r.step(); return r.series;
+}
+S.ghost = ghostRun();
+
+/* ------------------------------------------------------------ sound (only started from a click) */
+function ensureAudio() {
+  try { if (!S.audio) S.audio = new (window.AudioContext || window.webkitAudioContext)(); if (S.audio.state === "suspended") S.audio.resume(); } catch (e) { S.audio = null; }
+}
+function beep(sev) {
+  if (S.muted || !S.audio) return;
+  try {
+    const ctx = S.audio, n = sev === "crit" ? 3 : 1;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t0 = ctx.currentTime + i * 0.22;
+      o.type = "square"; o.frequency.value = sev === "crit" ? 880 : 620;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g).connect(ctx.destination); o.start(t0); o.stop(t0 + 0.18);
+    }
+  } catch (e) {}
+}
+
+/* ------------------------------------------------------------ notifications: toasts + bell history */
+function notify({ sev = "info", title, body = "", actions = [], sticky = false, pulse = false, go = null, silent = false }) {
+  const note = { id: S.notes.length + 1, sev, title, body, read: false, at: S.run ? rel(Math.max(0, S.run.t - 1)) : "before job" };
+  S.notes.unshift(note); renderBell();
+  if (!silent) beep(sev);
+  const t = document.createElement("div");
+  t.className = `toast ${sev}${pulse ? " pulse" : ""}`;
+  t.setAttribute("role", sev === "crit" ? "alert" : "status");
+  t.innerHTML = `<div class="row"><div class="tt">${esc(title)}</div><button class="x" aria-label="Dismiss">×</button></div>${body ? `<div class="tb">${esc(body)}</div>` : ""}<div class="slot"></div>`;
+  const close = () => { t.remove(); };
+  t.querySelector(".x").onclick = close;
+  if (actions.length) {
+    const a = document.createElement("div"); a.className = "ta";
+    for (const ac of actions) {
+      const b = document.createElement("button"); b.className = `btn sm ${ac.cls || ""}`; b.textContent = ac.label;
+      b.onclick = () => { ac.fn(); if (!ac.keep) close(); }; a.appendChild(b);
+    }
+    t.appendChild(a);
+  }
+  const box = $("#toasts"); box.prepend(t);
+  const kids = [...box.children];
+  if (kids.length > 4) { const victim = kids.reverse().find((k) => !k.dataset.sticky); (victim || kids[0]).remove(); }
+  if (sticky) t.dataset.sticky = "1"; else setTimeout(close, sev === "warn" ? 9000 : 6500);
+  return { el: t, close, note };
+}
+function renderBell() {
+  const unread = S.notes.filter((n) => !n.read).length;
+  const b = $("#badge"); b.textContent = unread; b.hidden = unread === 0;
+  const p = $("#bellpanel");
+  p.innerHTML = `<div class="hbar" style="margin-bottom:6px"><b style="flex:1">Notifications</b><button class="btn sm" id="markread">Mark all read</button><button class="btn sm" id="clearn">Clear</button></div>` +
+    (S.notes.length ? S.notes.map((n) => `<div class="note ${n.sev}${n.read ? " read" : ""}"><span class="d"></span><div><b>${esc(n.title)}</b><span>${esc(n.body)}</span><br><time>${esc(n.at)}</time></div></div>`).join("") : `<p class="muted" style="padding:10px 4px">Nothing yet. Alerts from a live run will collect here.</p>`);
+  $("#markread").onclick = () => { S.notes.forEach((n) => (n.read = true)); renderBell(); };
+  $("#clearn").onclick = () => { S.notes = []; renderBell(); };
+}
+$("#bell").onclick = () => {
+  const p = $("#bellpanel"), open = p.hidden;
+  p.hidden = !open; $("#bell").setAttribute("aria-expanded", String(open));
+  if (open) { S.notes.forEach((n) => (n.read = true)); renderBell(); }
+};
+document.addEventListener("click", (e) => { if (!e.target.closest("#bellpanel,#bell")) { $("#bellpanel").hidden = true; $("#bell").setAttribute("aria-expanded", "false"); } });
+$("#mute").onclick = () => { S.muted = !S.muted; $("#mute").textContent = S.muted ? "Sound off" : "Sound on"; $("#mute").setAttribute("aria-pressed", String(S.muted)); ensureAudio(); };
+(function theme() {
+  const root = document.documentElement;
+  $("#theme").onclick = () => {
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark"; draw();
+  };
+})();
+
+/* ------------------------------------------------------------ tabs */
+function showTab(name) {
+  for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+  for (const p of document.querySelectorAll(".pane")) p.hidden = p.id !== "pane-" + name;
+  if (name === "live") draw();
+  if (name === "rules") scrollSrc();
+  if (name === "hand") renderHandoff();
+  $("#t-hand .dot")?.remove();
+}
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
+const goTab = (n) => showTab(n);
+
+/* ------------------------------------------------------------ event log */
+function logEvent(ts, kind, text) {
+  S.events.unshift({ ts, kind, text }); renderFeed();
+}
+function renderFeed() {
+  $("#feed").innerHTML = S.events.length
+    ? S.events.map((e) => `<li class="${e.kind}"><span class="ts">${rel(e.ts)}</span><span class="tx">${esc(e.text)}</span></li>`).join("")
+    : `<li><span class="ts"></span><span class="tx muted">Nothing has happened yet.</span></li>`;
+}
+
+/* ------------------------------------------------------------ the pre-warning dialog */
+function openModal(html) { const m = $("#modal"); m.innerHTML = html; $("#backdrop").hidden = false; const f = m.querySelector("button.primary,button"); f && f.focus(); }
+function closeModal() { $("#backdrop").hidden = true; }
+
+function queueJob() {
+  ensureAudio();
+  const pw = prewarning(); S.pw = pw;
+  S.phase = "warning"; syncButtons();
+  notify({ sev: "crit", title: "Pre-warning: " + pw.title, body: "Verified steps are ready. Review them before the job starts.", sticky: false, silent: false });
+  const steps = pw.steps.map((s) => `<div class="step"><b>${esc(s.title)}</b>${esc(s.how)}<div class="v">✓ Checked in simulation: no cooling trip, peak ${s.peakTemp.toFixed(1)} °C, peak facility power ${fmt(s.peakFac)} kW (${fmt(s.margin)} kW under the ${fmt(D.facts.power_cap_kw)} kW cap)</div></div>`).join("");
+  openModal(`
+    <span class="chip crit">PRE-WARNING · before the job starts</span>
+    <h2 id="mTitle">${esc(pw.title)}</h2>
+    <p class="muted">Why Interlock expects this, from the original controller code:</p>
+    <ul>${pw.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>
+    <p class="muted">Past incidents that match: ${pw.tickets.map((t) => `<span class="chip mute mono">${esc(t.id)}</span>`).join(" ")}</p>
+    <details class="watch"><summary>Other things to watch (${pw.watchouts.length})</summary><ul>${pw.watchouts.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>
+    <p class="muted">Steps that avoid it:</p>
+    <div class="steps">${steps}</div>
+    <div class="mbtns">
+      <button class="btn primary" data-pick="prestart">Pre-start chiller 2</button>
+      <button class="btn primary" data-pick="staged">Start in two stages</button>
+      <button class="btn" data-pick="both">Do both</button>
+      <span class="sp"></span>
+      <button class="btn" data-pick="ignore">Ignore and start anyway</button>
+      <button class="btn" data-pick="cancel">Cancel</button>
+    </div>`);
+  $("#modal").querySelectorAll("[data-pick]").forEach((b) => (b.onclick = () => pick(b.dataset.pick)));
+}
+function pick(choice) {
+  closeModal();
+  if (choice === "cancel") { S.phase = "idle"; syncButtons(); return; }
+  S.plan = { lead: null, staged: false };
+  if (choice === "prestart" || choice === "both") S.plan.lead = 60;
+  if (choice === "staged" || choice === "both") S.plan.staged = true;
+  startRun(choice);
+}
+
+/* ------------------------------------------------------------ run control */
+function startRun(choice) {
+  S.run = new Run(S.plan.staged ? "staged" : "single");
+  if (S.plan.lead) S.run.manualAt = JS - S.plan.lead;
+  S.events = []; S.seen = {}; S.alert = null; S.alertDone = false; S.acked = false; S.skip = false; S.handoff = null; S.outcome = null;
+  S.phase = "running"; syncButtons();
+  const label = { prestart: "Plan applied: pre-start chiller 2 one minute before the job", staged: "Plan applied: start the job in two stages", both: "Plan applied: pre-start chiller 2 and start in two stages", ignore: "Operator chose to start without changes" }[choice];
+  logEvent(0, choice === "ignore" ? "warn" : "action", label);
+  notify({ sev: choice === "ignore" ? "warn" : "ok", title: choice === "ignore" ? "Starting without changes" : "Plan accepted", body: label, silent: true });
+  last = 0; acc = 0;
+}
+function resetAll() {
+  S.run = null; S.phase = "idle"; S.events = []; S.alert?.toast?.close(); S.alert = null; S.handoff = null; S.outcome = null; S.skip = false;
+  $("#toasts").innerHTML = ""; $("#result").classList.remove("on"); syncButtons(); renderFeed(); renderTiles(); draw(); renderHandoff();
+}
+function syncButtons() {
+  const run = S.phase === "running";
+  $("#go").disabled = S.phase === "running" || S.phase === "warning";
+  $("#go").textContent = S.phase === "done" ? "Run it again" : "Queue the training job";
+  $("#go").onclick = () => (S.phase === "done" ? (resetAll(), queueJob()) : queueJob());
+  $("#skip").disabled = !run; $("#reset").disabled = S.phase === "idle" || S.phase === "warning";
+  const manualOn = S.run && S.run.manualAt !== null && S.run.manualAt <= S.run.t;
+  $("#opCh2").disabled = !run || manualOn || S.run.manualAt !== null;
+  $("#opAck").disabled = !(run && S.alert && !S.acked);
+  $("#opHint").textContent = S.phase === "idle" ? "Queue the job to see the pre-warning. Once it is running, you can step in here."
+    : S.phase === "warning" ? "Waiting for your decision on the pre-warning."
+    : S.phase === "done" ? "Run finished. Open Shift handoff for the summary."
+    : manualOn || (S.run && S.run.manualAt !== null) ? "Chiller 2 override is on or scheduled."
+    : "If an alert appears, turning on chiller 2 early is the fix. The sooner, the better.";
+  const g = $("#jobSub");
+  g.textContent = S.phase === "idle" ? `Hall is idle at ${fmt(P.idle_kw)} kW. A training job will take it to ${fmt(P.full_kw)} kW in about ${P.ramp_s} seconds, starting ${JS} s from now.`
+    : S.phase === "warning" ? "Waiting on the pre-warning."
+    : S.phase === "running" ? "Simulation running. Time is shown relative to the job start (T+0)."
+    : "Run finished.";
+}
+$("#skip").onclick = () => { S.skip = true; };
+$("#reset").onclick = resetAll;
+$("#opCh2").onclick = () => {
+  if (S.phase !== "running") return;
+  S.run.manualAt = S.run.t;
+  const f = forecast(S.run);
+  logEvent(S.run.t, "action", "Operator turned on the chiller 2 manual override");
+  if (S.alert) { S.alert.toast.close(); S.acked = true; }
+  S.alertDone = true;
+  if (f.willTrip) notify({ sev: "warn", title: "Override on, but too late to prevent a trip", body: `Forecast: protective rule ${f.primary.rule} still acts about ${f.primary.t - S.run.t} s from now. Chiller 2 will shorten the outage.`, sticky: false });
+  else notify({ sev: "ok", title: "Override accepted: trip avoided", body: `Forecast: no cooling stop. Peak supply temperature ${f.peakTemp.toFixed(1)} °C, peak facility power ${fmt(f.peakFac)} kW.` });
+  syncButtons();
+};
+$("#opAck").onclick = () => { if (S.alert) { S.alert.toast.close(); S.acked = true; logEvent(S.run.t, "action", "Alert acknowledged by operator"); } syncButtons(); };
+
+/* ------------------------------------------------------------ one tick of the simulation */
+function mitigated() { return S.run.manualAt !== null || S.run.profile === "staged"; }
+function speed() {
+  if (S.skip) return 250;
+  const t = S.run.t;
+  if (t < JS - 4) return 25;
+  if (t < JS - 1) return 3;
+  if (!mitigated() && !S.alertDone && t < JS + 7) return 0.7;
+  if (t < JS + 30) return 4;
+  if (t < JS + 120) return 14;
+  return 30;
+}
+function tick() {
+  const r = S.run, f = r.step(), ts = r.t - 1, pl = r.pl, s = r.series;
+  if (S.plan.lead && ts === r.manualAt) logEvent(ts, "action", "Chiller 2 manual override ON (per the verified plan)");
+  if (ts === JS) logEvent(ts, "info", `Training job started. IT power ramping from ${fmt(P.idle_kw)} kW to ${fmt(P.full_kw)} kW`);
+  if (!S.alertDone && !mitigated() && ts >= 3 && s.fac[ts] - s.fac[ts - 3] > 100) liveAlert(ts);
+  for (const id of f) {
+    const first = !S.seen[id]; S.seen[id] = true;
+    if (id === "R1" && first) {
+      logEvent(ts, "crit", `Rule R1 fired (lines ${ruleById.R1.lines[0]}-${ruleById.R1.lines[1]}): cooling loop tripped, pumps and chiller 2 stopped`);
+      notify({ sev: "crit", title: "Cooling loop tripped (rule R1)", body: `The old controller read the fast temperature rise as a fault and stopped the pumps. Restart is blocked for ${D.facts.lockout_s} s.`, sticky: true, pulse: true });
+    } else if (id === "R3" && first) {
+      logEvent(ts, "ok", "Rule R3: lockout over, pumps restarting");
+      notify({ sev: "ok", title: "Cooling restarting", body: "The restart lockout ended (rule R3). The job was lost and must be restarted by the scheduler." });
+    } else if (id === "R5" && first) logEvent(ts, "info", "Rule R5: manual chiller 2 start accepted");
+    else if (id === "R4" && first) logEvent(ts, "info", "Rule R4: chiller 1 busy for 90 s, chiller 2 staged in automatically");
+    else if (id === "R6" && first) { logEvent(ts, "warn", `Rule R6: facility power over ${fmt(D.facts.power_cap_kw)} kW, load shed 15%`); notify({ sev: "warn", title: "Load shed (rule R6)", body: `Facility power passed the ${fmt(D.facts.power_cap_kw)} kW cap.` }); }
+  }
+  if (!S.seen.throttle && pl.temp >= P.throttle_c) {
+    S.seen.throttle = true; logEvent(ts, "warn", "Supply water at 15 °C: GPUs throttling");
+    notify({ sev: "warn", title: "GPUs throttling", body: "Supply water reached 15 °C. Training speed is dropping." });
+  }
+  if (!S.seen.shutdown && pl.shutdown) {
+    S.seen.shutdown = true; logEvent(ts, "crit", "Supply water at 18 °C: GPU thermal shutdown. The job is lost");
+    notify({ sev: "crit", title: "GPU thermal shutdown", body: "The job was lost. It cannot restart until cooling is back and the lockout ends.", sticky: true });
+  }
+  if (S.alert && !S.alert.closed && r.t > S.alert.deadline) {
+    S.alert.closed = true;
+    S.alert.toast.el.querySelector(".cd").textContent = "Window to prevent the trip has closed";
+    logEvent(ts, "crit", "The window to prevent the trip closed");
+  }
+}
+function liveAlert(ts) {
+  S.alertDone = true;
+  const w = actWithin(S.run);
+  const deadline = w === null ? -1 : S.run.t + w;
+  const title = w === null ? "Power spike: cooling trip is now unavoidable" : "Power spike detected: cooling trip coming";
+  const body = w === null ? `Facility power jumped ${fmt(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} kW in 3 s. Heat now exceeds what one chiller can remove. Expect GPU throttling and a ${D.facts.lockout_s} s restart block.`
+    : `Facility power jumped ${fmt(S.run.series.fac[ts] - S.run.series.fac[ts - 3])} kW in 3 s. One chiller cannot keep up, and rule R1 will stop the cooling loop. Turning on chiller 2 now still prevents it.`;
+  logEvent(ts, "crit", title);
+  const n = notify({
+    sev: "crit", title, body, sticky: true, pulse: true,
+    actions: w === null ? [] : [{ label: "Start chiller 2 now", cls: "danger", fn: () => $("#opCh2").click(), keep: true }, { label: "Acknowledge", fn: () => $("#opAck").click(), keep: true }],
+  });
+  const cd = document.createElement("div"); cd.className = "cd"; cd.textContent = w === null ? "Window to prevent the trip has closed" : "";
+  n.el.querySelector(".slot").appendChild(cd);
+  S.alert = { toast: n, deadline, closed: w === null };
+  syncButtons();
+}
+function updateCountdown() {
+  if (!S.alert || S.alert.closed || !S.run) return;
+  const left = S.alert.deadline - S.run.t;
+  S.alert.toast.el.querySelector(".cd").textContent = `Act within ${Math.max(0, left)} s`;
+}
+
+/* ------------------------------------------------------------ finish + handoff */
+function finish() {
+  S.phase = "done"; S.skip = false;
+  const r = S.run, s = r.series, tripped = !!S.seen.R1;
+  const peakT = Math.max(...s.temp), peakFac = Math.max(...s.fac);
+  const lostScans = s.it.filter((v, i) => i >= JS && v < 5).length;
+  S.outcome = { tripped, shutdown: !!S.seen.shutdown, throttle: !!S.seen.throttle, peakT, peakFac, lostScans };
+  S.handoff = buildHandoff();
+  const ok = !tripped;
+  logEvent(r.t - 1, ok ? "ok" : "crit", ok ? "Run complete: the job ran without a cooling trip" : "Run complete: job lost to a cooling trip");
+  const res = $("#result"); res.classList.add("on");
+  res.innerHTML = `<h3>Result</h3><div class="hbar"><span class="chip ${ok ? "ok" : "crit"}">${ok ? "No trip" : "Cooling trip"}</span>
+    <span>Peak supply temperature <b class="mono">${peakT.toFixed(1)} °C</b></span><span>Peak facility power <b class="mono">${fmt(peakFac)} kW</b> (cap ${fmt(D.facts.power_cap_kw)})</span>
+    ${tripped ? `<span>Job down for about <b class="mono">${Math.round(lostScans / 60 * 10) / 10} min</b></span>` : ""}</div>
+    <p class="muted">${ok ? "The warning was acted on in time. Compare this with the dashed line in the chart: that is what would have happened with no action." : "Replay it and use the pre-warning to see the difference."}</p>`;
+  const tab = $("#t-hand"); if (!tab.querySelector(".dot")) tab.insertAdjacentHTML("beforeend", '<span class="dot"></span>');
+  notify({ sev: ok ? "ok" : "warn", title: "Shift handoff ready", body: "A summary of this run with the cause, what was done and follow-ups is ready to read.", actions: [{ label: "Open handoff", cls: "primary", fn: () => goTab("hand") }] });
+  syncButtons();
+}
+function buildHandoff() {
+  const o = S.outcome, r1 = ruleById.R1, ev = [...S.events].reverse();
+  const L = [];
+  L.push("SHIFT HANDOFF — Cluster B cooling, Hall 2");
+  L.push("");
+  L.push("STATUS");
+  L.push(o.tripped ? `  The training job was lost: cooling loop tripped, GPUs ${o.shutdown ? "shut down on temperature" : "throttled"}.` : "  The training job ran without a cooling trip.");
+  L.push(`  Peak supply temperature ${o.peakT.toFixed(1)} °C. Peak facility power ${fmt(o.peakFac)} kW against a ${fmt(D.facts.power_cap_kw)} kW cap.`);
+  L.push("");
+  L.push("WHAT HAPPENED");
+  for (const e of ev) L.push(`  ${rel(e.ts).padEnd(7)} ${e.text}`);
+  L.push("");
+  L.push(o.tripped ? "ROOT CAUSE" : "RISK THE PLAN AVOIDED");
+  L.push(`  ${r1.english}`);
+  L.push(`  (Original controller lines ${r1.lines[0]}-${r1.lines[1]}.) The job takes IT power from ${fmt(P.idle_kw)} kW to ${fmt(P.full_kw)} kW in ${P.ramp_s} s; one chiller removes about ${fmt(P.chiller_cap_kw)} kW,`);
+  L.push("  so the supply temperature rises faster than the controller allows and it stops the loop. Chiller 2 takes about 45 s to be useful.");
+  L.push(`  Matches past incidents: ${r1.tickets.map((t) => t.id).join(", ")}.`);
+  L.push("");
+  L.push("FOLLOW-UPS");
+  L.push("  1. Before every cluster start from idle: turn on the chiller 2 manual override at least 60 s early, or have the scheduler start the job at half power for 150 s.");
+  r1.findings.forEach((f, i) => L.push(`  ${i + 2}. ${f.text}`));
+  const n = r1.findings.length + 2;
+  D.findings.filter((f) => !f.rules.includes("R1")).forEach((f, i) => L.push(`  ${n + i}. ${f.text}`));
+  return L.join("\n");
+}
+function briefing() {
+  const pw = S.pw || prewarning(), L = [];
+  L.push("PRE-JOB BRIEFING — Cluster B cooling, Hall 2", "");
+  L.push("PREDICTION", `  ${pw.title}.`);
+  pw.evidence.forEach((e) => L.push(`  - ${e}`));
+  L.push("", "VERIFIED STEPS (each checked in simulation)");
+  pw.steps.forEach((s, i) => L.push(`  ${i + 1}. ${s.title}: ${s.how}`));
+  L.push("", "ALSO WORTH KNOWING");
+  pw.watchouts.forEach((w) => L.push(`  - ${w}`));
+  return L.join("\n");
+}
+function renderHandoff() {
+  const done = !!S.handoff;
+  $("#handIntro").textContent = done ? "Generated from the run you just did. Paste it into the shift log or a ticket." : "No run yet, so this shows the pre-job briefing. Run the scenario on the Live tab to generate the real shift handoff.";
+  $("#hand").textContent = done ? S.handoff : briefing();
+  $("#copy").textContent = done ? "Copy handoff" : "Copy briefing";
+}
+$("#copy").onclick = () => {
+  const txt = $("#hand").textContent;
+  try {
+    navigator.clipboard.writeText(txt).then(() => { $("#copied").textContent = "Copied."; notify({ sev: "ok", title: "Copied to clipboard", silent: true }); }, () => { $("#copied").textContent = "Copy was blocked here. Select the text and copy it."; });
+  } catch (e) { $("#copied").textContent = "Copy was blocked here. Select the text and copy it."; }
+};
+
+/* ------------------------------------------------------------ tiles */
+function renderTiles() {
+  const pl = S.run ? S.run.pl : { temp: P.setpoint_c, it: P.idle_kw, fac: P.idle_kw * (1 + P.chiller_kw_per_kw) + P.pump_kw, cap: P.chiller_cap_kw, ch2t: 0, pumpOn: true, shutdown: false };
+  const c = S.run ? S.run.c.s : { lockout: 0, tripped: false };
+  const cls = pl.temp >= P.shutdown_c ? "crit" : pl.temp >= P.throttle_c ? "crit" : pl.temp >= P.setpoint_c + 2 ? "warn" : "";
+  const ch2 = pl.ch2t === 0 ? ["Standby", ""] : pl.ch2t < P.ch2_delay_s ? [`Starting ${P.ch2_delay_s - pl.ch2t} s`, "warn"] : pl.ch2t < P.ch2_delay_s + P.ch2_ramp_s ? ["Ramping up", "info"] : ["Online", ""];
+  const loop = !pl.pumpOn ? [c.lockout > 0 ? `Stopped` : "Restarting", "crit", c.lockout > 0 ? `restart in ${c.lockout} s` : ""] : ["Running", "", "pumps on"];
+  const T = (k, v, s, cl = "") => `<div class="tile ${cl}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  $("#tiles").innerHTML =
+    T("Supply temp", `${pl.temp.toFixed(1)} °C`, `setpoint ${P.setpoint_c} °C`, cls) +
+    T("IT power", `${fmt(pl.it)} kW`, pl.shutdown ? "GPUs shut down" : pl.temp >= P.throttle_c ? "GPUs throttled" : "heat to remove", pl.shutdown ? "crit" : pl.temp >= P.throttle_c ? "warn" : "") +
+    T("Cooling capacity", `${fmt(pl.pumpOn ? pl.cap : 0)} kW`, "available now", !pl.pumpOn ? "crit" : "") +
+    T("Facility power", `${fmt(pl.fac)} kW`, `cap ${fmt(D.facts.power_cap_kw)} kW`, pl.fac > D.facts.power_cap_kw ? "crit" : pl.fac > D.facts.power_cap_kw - 100 ? "warn" : "") +
+    T("Chiller 2", ch2[0], "second chiller", ch2[1]) +
+    T("Cooling loop", loop[0], loop[2], loop[1]);
+  $("#clock").textContent = S.run ? rel(Math.max(0, S.run.t - 1)) : rel(0);
+}
+
+/* ------------------------------------------------------------ charts */
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function chart(cv, { series, hlines = [], yMin, yMax, unit, upTo }) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) return;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const L = 46, R = 10, T = 8, B = 22, pw = W - L - R, ph = H - T - B, N = P.duration_s;
+  const X = (i) => L + (i / (N - 1)) * pw, Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
+  g.font = "11px " + css("--mono"); g.fillStyle = css("--ink2"); g.strokeStyle = css("--line"); g.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = yMin + ((yMax - yMin) * k) / 4, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(W - R, y); g.stroke();
+    g.textAlign = "right"; g.fillText(unit === "kW" ? fmt(v) : v.toFixed(0), L - 6, y + 4);
+  }
+  g.textAlign = "center";
+  for (let tt = JS - 60; tt <= N; tt += 60) { if (tt < 0) continue; g.fillText(tt === JS ? "T+0" : (tt - JS > 0 ? "+" : "−") + Math.abs(tt - JS), X(tt), H - 6); }
+  g.strokeStyle = css("--ink2"); g.setLineDash([2, 4]); g.beginPath(); g.moveTo(X(JS), T); g.lineTo(X(JS), T + ph); g.stroke(); g.setLineDash([]);
+  for (const h of hlines) { g.strokeStyle = css(h.color); g.setLineDash([3, 4]); g.lineWidth = 1.5; g.beginPath(); g.moveTo(L, Y(h.y)); g.lineTo(W - R, Y(h.y)); g.stroke(); g.setLineDash([]); }
+  for (const s of series) {
+    const data = s.data, end = s.live ? Math.min(data.length, upTo) : data.length;
+    if (end < 2) continue;
+    g.strokeStyle = css(s.color); g.lineWidth = s.w || 2.2; g.setLineDash(s.dash || []); g.beginPath();
+    for (let i = 0; i < end; i++) { const x = X(i), y = Y(Math.min(yMax, Math.max(yMin, data[i]))); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke(); g.setLineDash([]);
+  }
+  if (S.run && upTo > 0) { g.fillStyle = css("--accent"); g.beginPath(); g.arc(X(Math.min(upTo, N) - 1), T + ph, 0, 0, 7); g.fill(); g.strokeStyle = css("--accent"); g.lineWidth = 1; g.beginPath(); g.moveTo(X(upTo - 1), T); g.lineTo(X(upTo - 1), T + ph); g.stroke(); }
+}
+function draw() {
+  if ($("#pane-live").hidden) return;
+  const s = S.run ? S.run.series : { temp: [], it: [], cap: [], fac: [] }, n = s.temp.length;
+  chart($("#c1"), { yMin: 5, yMax: 20, unit: "C", upTo: n, hlines: [{ y: P.throttle_c, color: "--warn" }, { y: P.shutdown_c, color: "--crit" }],
+    series: [{ data: S.ghost.temp, color: "--ink2", dash: [6, 5], w: 1.8 }, { data: s.temp, color: "--accent", live: true }] });
+  chart($("#c2"), { yMin: 0, yMax: 2000, unit: "kW", upTo: n, hlines: [{ y: D.facts.power_cap_kw, color: "--crit" }],
+    series: [{ data: s.cap, color: "--ok", live: true }, { data: s.fac, color: "--info", live: true, w: 1.6 }, { data: s.it, color: "--accent", live: true }] });
+}
+new ResizeObserver(draw).observe($("#pane-live"));
+
+/* ------------------------------------------------------------ animation loop */
+let last = 0, acc = 0;
+function frame(ts) {
+  if (!last) last = ts;
+  const dt = Math.min(0.1, (ts - last) / 1000); last = ts;
+  if (S.phase === "running") {
+    acc += dt * speed();
+    let guard = 0;
+    while (acc >= 1 && S.run && !S.run.done && guard++ < 400) { acc -= 1; tick(); }
+    if (S.run.done) finish();
+    updateCountdown(); renderTiles(); draw(); syncRunButtons();
+  }
+  requestAnimationFrame(frame);
+}
+function syncRunButtons() {
+  const manual = S.run.manualAt !== null;
+  $("#opCh2").disabled = S.phase !== "running" || manual;
+  $("#opAck").disabled = !(S.phase === "running" && S.alert && !S.acked);
+}
+
+/* ------------------------------------------------------------ rules tab */
+let selRule = "R1", srcMode = "legacy";
+function rName(n) { const g = D.glossary[n]; return g ? g.desc : n; }
+function renderRules() {
+  $("#rlist").innerHTML = D.rules.map((r) => `<button class="rcard" data-r="${r.id}" aria-pressed="${r.id === selRule}">
+    <div class="h"><b>${r.id}</b><span class="chip mute mono">lines ${r.lines[0] === r.lines[1] ? r.lines[0] : r.lines[0] + "-" + r.lines[1]}</span>${r.protective ? '<span class="chip crit">can interrupt cooling</span>' : ""}${r.tickets.length ? `<span class="chip warn">${r.tickets.length} incident${r.tickets.length === 1 ? "" : "s"}</span>` : ""}</div>
+    <p>${esc(r.english)}</p></button>`).join("");
+  document.querySelectorAll(".rcard").forEach((b) => (b.onclick = () => { selRule = b.dataset.r; srcMode = "legacy"; renderRules(); scrollSrc(); }));
+  $("#segL").setAttribute("aria-pressed", String(srcMode === "legacy")); $("#segM").setAttribute("aria-pressed", String(srcMode === "modern"));
+  const r = ruleById[selRule], src = srcMode === "legacy" ? D.legacy_source : D.modern_source;
+  $("#src").innerHTML = src.split("\n").map((ln, i) => `<div data-l="${i + 1}" class="${srcMode === "legacy" && i + 1 >= r.lines[0] && i + 1 <= r.lines[1] ? "hl" : ""}"><i>${i + 1}</i>${esc(ln) || " "}</div>`).join("");
+  const ml = r.mitigations || [];
+  $("#detail").innerHTML = `
+    <div class="card"><h3>${r.id} in plain English</h3><p>${esc(r.english)}</p>
+      <p class="muted" style="margin-top:8px;font-size:13px">Reads: ${r.reads.map((x) => esc(rName(x))).join(", ") || "nothing"}. Changes: ${r.writes.map((x) => esc(rName(x))).join(", ") || "nothing"}.</p></div>
+    ${r.findings.length ? `<div class="card"><h3>Needs a human decision</h3>${r.findings.map((f) => `<div class="finding"><b>${esc(f.label)}.</b> ${esc(f.text)}</div>`).join("")}</div>` : ""}
+    ${r.tickets.length ? `<div class="card"><h3>Past incidents this rule explains</h3>${r.tickets.map((t) => `<div class="tk"><b>${esc(t.id)}</b> <span class="muted">${esc(t.date)}</span><br>${esc(t.text)}</div>`).join("")}</div>` : ""}
+    ${ml.length ? `<div class="card"><h3>Verified ways to avoid it</h3>${ml.map((m) => `<div class="tk"><b>${esc(m.title)}</b><br>${esc(m.how)}</div>`).join("")}</div>` : ""}`;
+}
+function scrollSrc() {
+  const c = $("#src"), h = c.querySelector(".hl");
+  if (h && srcMode === "legacy") c.scrollTop = Math.max(0, h.offsetTop - 40); else c.scrollTop = 0;
+}
+$("#segL").onclick = () => { srcMode = "legacy"; renderRules(); scrollSrc(); };
+$("#segM").onclick = () => { srcMode = "modern"; renderRules(); scrollSrc(); };
+
+/* ------------------------------------------------------------ verify tab */
+let vBusy = false;
+async function runParity(bug) {
+  if (vBusy) return; vBusy = true;
+  document.querySelectorAll("#vrun,#bugs button").forEach((b) => (b.disabled = true));
+  $("#vout").innerHTML = '<span class="muted">Running…</span>';
+  const res = await parityTest({ sequences: 400, bug, onProgress: (d, t) => { $("#vbar").style.width = (100 * d) / t + "%"; } });
+  vBusy = false; document.querySelectorAll("#vrun,#bugs button").forEach((b) => (b.disabled = false));
+  const cov = Object.entries(res.cov).map(([id, n]) => `<span class="chip ${n ? "ok" : "crit"} mono">${id} ×${fmt(n)}</span>`).join("");
+  if (res.passed) {
+    $("#vout").innerHTML = `<div class="vres ok"><h4>✓ The rewrite matches the original</h4>${fmt(res.scans)} control cycles across ${res.sequences} generated scenarios, 0 differences. ${res.covered} of ${res.total} rules exercised. Took ${res.seconds} s.<div class="cov">${cov}</div></div>`;
+  } else {
+    const d = res.first.diffs;
+    $("#vout").innerHTML = `<div class="vres bad"><h4>✗ The rewrite behaves differently</h4>${res.bugText ? `Planted mistake: ${esc(res.bugText)}.<br>` : ""}${res.mismatches} of ${res.sequences} scenarios differ. First difference at scenario ${res.first.sequence}, cycle ${res.first.scan}:
+      <table><tr><th>What differs</th><th>Original</th><th>Rewrite</th></tr>${d.map((x) => `<tr><td>${esc(x.field)}</td><td class="mono">${esc(String(x.legacy))}</td><td class="mono">${esc(String(x.rewrite))}</td></tr>`).join("")}</table><div class="cov">${cov}</div></div>`;
+    if (bug) notify({ sev: "crit", title: "Parity check failed", body: `${res.bugText}. The rewrite must not be deployed until this is fixed.`, silent: false });
+  }
+}
+$("#vrun").onclick = () => { ensureAudio(); runParity(null); };
+$("#bugs").innerHTML = Object.entries(BUGS).map(([k, b]) => `<button class="btn" data-bug="${k}">${esc(b.text)}</button>`).join("");
+document.querySelectorAll("[data-bug]").forEach((b) => (b.onclick = () => { ensureAudio(); runParity(b.dataset.bug); }));
+
+/* ------------------------------------------------------------ start */
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#backdrop").hidden) pick("cancel"); });
+renderRules(); renderBell(); renderFeed(); renderTiles(); syncButtons(); renderHandoff();
+requestAnimationFrame(() => { draw(); runParity(null); });
+requestAnimationFrame(frame);
+window.__IL_APP = S; /* handy for tests */
+})();
+
+</script>
+</body>
+</html>
